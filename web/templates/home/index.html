@@ -1,0 +1,8 @@
+{{define "content"}}
+<section class="panel">
+  <p class="eyebrow">Fondasi aplikasi</p>
+  <h1>Halo, {{.Principal.Username}}.</h1>
+  <p>Autentikasi dan session berhasil. Modul access control, koneksi database, viewer, dan migration belum dipasang pada scaffold P1 ini.</p>
+  {{if .Principal.IsPlatformAdmin}}<p class="muted">Akun ini memiliki flag Platform Admin. Hak akses ke database tetap harus ditentukan melalui group.</p>{{end}}
+</section>
+{{end}}
