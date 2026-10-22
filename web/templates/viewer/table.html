@@ -1,0 +1,151 @@
+{{define "content"}}
+<div class="header-actions">
+  <div>
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span>/</span>
+      <a href="/databases">Databases</a>
+      <span>/</span>
+      <a href="/databases/{{.Data.DBID}}/schema">DB #{{.Data.DBID}}</a>
+      <span>/</span>
+      <span>{{.Data.Table.Schema}}.{{.Data.Table.Name}}</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: .75rem;">
+      <h1>Table: {{.Data.Table.Name}}</h1>
+      <span class="badge badge-{{.Data.Engine}}">{{.Data.Engine}}</span>
+    </div>
+    <p class="muted">Schema definition: {{.Data.Table.Schema}}</p>
+  </div>
+</div>
+
+<div class="tabs">
+  <a href="/databases/{{.Data.DBID}}/tables/{{.Data.Table.Name}}?schema={{.Data.Table.Schema}}" class="tab-link active">Structure</a>
+  <a href="/databases/{{.Data.DBID}}/tables/{{.Data.Table.Name}}/data?schema={{.Data.Table.Schema}}" class="tab-link">Data</a>
+</div>
+
+<div class="panel" style="margin-bottom: 2rem;">
+  <h2>Columns ({{len .Data.Table.Columns}})</h2>
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Column Name</th>
+          <th>Data Type</th>
+          <th>Nullable</th>
+          <th>Default</th>
+          <th>Key</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Data.Table.Columns}}
+        <tr>
+          <td class="mono">{{.Ordinal}}</td>
+          <td><strong>{{.Name}}</strong></td>
+          <td class="mono">{{.DataType}}</td>
+          <td>
+            {{if .Nullable}}
+            <span style="color: #5d6874;">YES</span>
+            {{else}}
+            <span style="font-weight: 600;">NO</span>
+            {{end}}
+          </td>
+          <td class="mono">{{deref .Default}}</td>
+          <td>
+            {{if .IsPrimaryKey}}
+            <span class="badge badge-pk">PRIMARY KEY</span>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom: 2rem;">
+  <h2>Constraints ({{len .Data.Table.Constraints}})</h2>
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Columns</th>
+          <th>Referenced Table / Columns</th>
+          <th>Definition</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Data.Table.Constraints}}
+        <tr>
+          <td><strong>{{.Name}}</strong></td>
+          <td>
+            {{if eq .Type "PRIMARY KEY"}}
+            <span class="badge badge-pk">PRIMARY KEY</span>
+            {{else if eq .Type "FOREIGN KEY"}}
+            <span class="badge badge-fk">FOREIGN KEY</span>
+            {{else if eq .Type "UNIQUE"}}
+            <span class="badge badge-unique">UNIQUE</span>
+            {{else if eq .Type "CHECK"}}
+            <span class="badge badge-check">CHECK</span>
+            {{else}}
+            <span class="badge">{{.Type}}</span>
+            {{end}}
+          </td>
+          <td class="mono">{{range $i, $col := .Columns}}{{if $i}}, {{end}}{{$col}}{{end}}</td>
+          <td>
+            {{if .RefTable}}
+            <span class="mono">{{.RefTable}} ({{range $i, $rc := .RefColumns}}{{if $i}}, {{end}}{{$rc}}{{end}})</span>
+            {{else}}
+            -
+            {{end}}
+          </td>
+          <td class="mono" style="max-width: 320px; overflow: hidden; text-overflow: ellipsis;">{{.Definition}}</td>
+        </tr>
+        {{else}}
+        <tr>
+          <td colspan="5" style="text-align: center; color: #5d6874; padding: 1.5rem;">No constraints defined on this table.</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Indexes ({{len .Data.Table.Indexes}})</h2>
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Method</th>
+          <th>Key Columns / Expressions</th>
+          <th>Unique</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Data.Table.Indexes}}
+        <tr>
+          <td><strong>{{.Name}}</strong></td>
+          <td class="mono">{{.Method}}</td>
+          <td class="mono">{{range $i, $col := .Columns}}{{if $i}}, {{end}}{{$col}}{{end}}</td>
+          <td>
+            {{if .Unique}}
+            <span class="badge badge-unique">UNIQUE</span>
+            {{else}}
+            <span class="muted">No</span>
+            {{end}}
+          </td>
+        </tr>
+        {{else}}
+        <tr>
+          <td colspan="4" style="text-align: center; color: #5d6874; padding: 1.5rem;">No indexes found.</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

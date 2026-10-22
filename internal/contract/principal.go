@@ -1,6 +1,4 @@
-// Package contract berisi kontrak minimum yang dipakai lintas modul.
-// File ini adalah draft scaffold. Jika tim sudah membekukan kontrak di repository,
-// pertahankan versi tim dan sesuaikan implementasi P1 terhadapnya.
+// Package contract defines shared interfaces and context models across modules.
 package contract
 
 import (
@@ -29,7 +27,7 @@ type SessionRevoker interface {
 	RevokeAllForUser(ctx context.Context, userID int64) error
 }
 
-// SessionInfo sengaja tidak memuat token session mentah.
+// SessionInfo represents authenticated session state without raw tokens.
 type SessionInfo struct {
 	UserID            int64
 	CreatedAt         time.Time
@@ -54,4 +52,6 @@ type PageData struct {
 	Principal Principal
 	CSRFToken string
 	Flash     string
+	Data      any
 }
+

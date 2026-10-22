@@ -9,6 +9,7 @@ import (
 	"github.com/example/if3110-milestone1/internal/contract"
 )
 
+// TemplateRenderer parses and executes HTML templates with the base layout.
 type TemplateRenderer struct {
 	root string
 }
@@ -22,8 +23,7 @@ func NewRenderer(root string) (*TemplateRenderer, error) {
 }
 
 func (r *TemplateRenderer) Render(w http.ResponseWriter, name string, data contract.PageData) error {
-	// Nama template dipetakan secara eksplisit agar input pengguna tidak dapat
-	// dipakai untuk memilih path file.
+	// Templates are mapped explicitly to prevent arbitrary file path traversal.
 	pages := map[string]string{
 		"login": filepath.Join("auth", "login.html"),
 		"home":  filepath.Join("home", "index.html"),

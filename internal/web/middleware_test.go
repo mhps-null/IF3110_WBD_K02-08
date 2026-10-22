@@ -9,31 +9,25 @@ import (
 	"testing"
 )
 
-func TestSecurityHeadersAreSet(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(recorder, req)
-	for _, header := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"} {
-		if recorder.Header().Get(header) == "" {
-			t.Errorf("security header %q missing", header)
-		}
-	}
-}
-
-func TestRequestLoggerDoesNotLogPathQueryOrCookie(t *testing.T) {
-	var logOutput bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&logOutput, nil))
-	req := httptest.NewRequest(http.MethodGet, "/reset/secret-session?password=hidden", nil)
+func TestSecurityMiddleware(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&output, nil))
+	req := httptest.NewRequest("GET", "/reset/secret-session?password=hidden", nil)
 	req.AddCookie(&http.Cookie{Name: "session_id", Value: "secret-session-value"})
-	recorder := httptest.NewRecorder()
-	RequestLogger(logger, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(recorder, req)
-	logLine := logOutput.String()
-	for _, secret := range []string{"reset/secret-session", "password=hidden", "secret-session-value"} {
-		if strings.Contains(logLine, secret) {
-			t.Errorf("log contains sensitive request data %q", secret)
+	rec := httptest.NewRecorder()
+	handler := RequestLogger(logger, SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })))
+	handler.ServeHTTP(rec, req)
+	for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"} {
+		if rec.Header().Get(name) == "" {
+			t.Errorf("missing %s", name)
 		}
 	}
-	if !strings.Contains(logLine, "duration_ms") {
-		t.Errorf("expected safe request metadata, got %q", logLine)
+	for _, secret := range []string{"reset/secret-session", "password=hidden", "secret-session-value"} {
+		if strings.Contains(output.String(), secret) {
+			t.Errorf("sensitive request data logged: %s", secret)
+		}
+	}
+	if !strings.Contains(output.String(), "duration_ms") {
+		t.Fatal("request was not logged")
 	}
 }

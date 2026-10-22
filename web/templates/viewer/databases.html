@@ -1,0 +1,45 @@
+{{define "content"}}
+<div class="header-actions">
+  <div>
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span>/</span>
+      <span>Databases</span>
+    </div>
+    <h1>Accessible Databases</h1>
+    <p class="muted">Databases assigned to your user account and group memberships.</p>
+  </div>
+</div>
+
+<div class="db-grid">
+  {{range .Data.Databases}}
+  <div class="db-card">
+    <div>
+      <div class="db-card-meta">
+        <span class="mono">DB #{{.DBID}}</span>
+        {{if eq .Level 1}}
+        <span class="badge badge-view">View Only</span>
+        {{else if eq .Level 2}}
+        <span class="badge badge-edit">View & Edit</span>
+        {{else}}
+        <span class="badge">No Access</span>
+        {{end}}
+      </div>
+      <h3 style="margin-top: .5rem; margin-bottom: 0;">
+        <a href="/databases/{{.DBID}}/schema" class="db-card-title">{{.Name}}</a>
+      </h3>
+    </div>
+    <div>
+      <a href="/databases/{{.DBID}}/schema" style="text-decoration: none;">
+        <button type="button" class="primary" style="width: 100%;">Explore Schema →</button>
+      </a>
+    </div>
+  </div>
+  {{else}}
+  <div class="panel" style="grid-column: 1 / -1; text-align: center; padding: 3rem; color: #5d6874;">
+    <p>No databases are currently accessible for your user account.</p>
+    <p class="muted" style="font-size: .875rem;">Contact your platform administrator to request database group access.</p>
+  </div>
+  {{end}}
+</div>
+{{end}}
