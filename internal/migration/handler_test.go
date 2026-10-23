@@ -39,6 +39,7 @@ func setupTestHandler() (*Handler, Service, *mockRenderer) {
 	svc := NewCustomService(repo, targetDB, executors)
 	renderer := &mockRenderer{}
 
+	// Default pass-through guards
 	guards := contract.Guards{
 		ViewDB: func(next http.Handler) http.Handler { return next },
 		EditDB: func(next http.Handler) http.Handler { return next },
@@ -123,6 +124,7 @@ func TestHandlerPrefillPage(t *testing.T) {
 		t.Errorf("expected template migration/new.html, got %s", r.lastTemplate)
 	}
 
+	// Verify that prefill DID NOT save to DB
 	list, _ := svc.ListMigrations(context.Background(), 1)
 	if len(list) != 0 {
 		t.Errorf("expected prefill route to NOT save migration to DB, got %d", len(list))
@@ -146,6 +148,7 @@ func TestHandlerCreateDraft(t *testing.T) {
 
 	mux.ServeHTTP(rec, req)
 
+	// Expect redirect to detail page
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303 See Other, got %d", rec.Code)
 	}
@@ -176,6 +179,7 @@ func TestHandlerExecuteMigration(t *testing.T) {
 		t.Errorf("expected template migration/detail.html, got %s", r.lastTemplate)
 	}
 
+	// Verify status became success
 	m, _ := svc.GetMigration(ctx, draft.ID)
 	if m.Status != StatusSuccess {
 		t.Errorf("expected status 'success', got %s", m.Status)
@@ -212,11 +216,12 @@ func TestHandlerAuthorizationRejection(t *testing.T) {
 	svc := NewCustomService(repo, targetDB, nil)
 	renderer := &mockRenderer{}
 
+	// Guard simulating View Only permission (EditDB rejects with 403 Forbidden)
 	guards := contract.Guards{
 		ViewDB: func(next http.Handler) http.Handler { return next },
 		EditDB: func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				http.Error(w, "Access denied", http.StatusForbidden)
+				http.Error(w, "Access denied: View Only permission cannot perform migration mutations", http.StatusForbidden)
 			})
 		},
 	}
@@ -225,6 +230,7 @@ func TestHandlerAuthorizationRejection(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
+	// 1. GET /databases/1/migrations should be ALLOWED for View Only
 	req := httptest.NewRequest("GET", "/databases/1/migrations", nil)
 	req = withUserPrincipal(req, 2, "bob_view_only")
 	rec := httptest.NewRecorder()
@@ -233,6 +239,7 @@ func TestHandlerAuthorizationRejection(t *testing.T) {
 		t.Errorf("expected View Only to view list, got status %d", rec.Code)
 	}
 
+	// 2. POST /databases/1/migrations (create) should be FORBIDDEN (403)
 	req = httptest.NewRequest("POST", "/databases/1/migrations", nil)
 	req = withUserPrincipal(req, 2, "bob_view_only")
 	rec = httptest.NewRecorder()
@@ -241,6 +248,7 @@ func TestHandlerAuthorizationRejection(t *testing.T) {
 		t.Errorf("expected 403 Forbidden for View Only trying to create migration, got %d", rec.Code)
 	}
 
+	// 3. POST /databases/1/migrations/1/execute should be FORBIDDEN (403)
 	req = httptest.NewRequest("POST", "/databases/1/migrations/1/execute", nil)
 	req = withUserPrincipal(req, 2, "bob_view_only")
 	rec = httptest.NewRecorder()
