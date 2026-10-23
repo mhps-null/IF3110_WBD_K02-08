@@ -31,7 +31,8 @@ func (f fakeUserRepo) FindByID(_ context.Context, id int64) (User, error) {
 }
 
 type fakeSessions struct {
-	valid map[string]contract.SessionInfo
+	valid     map[string]contract.SessionInfo
+	rotateErr error
 }
 
 func (f *fakeSessions) Create(_ context.Context, id int64, now time.Time) (string, contract.SessionInfo, error) {
@@ -47,6 +48,9 @@ func (f *fakeSessions) Load(_ context.Context, id string, _ time.Time) (contract
 	return info, nil
 }
 func (f *fakeSessions) Rotate(ctx context.Context, id string, now time.Time) (string, contract.SessionInfo, error) {
+	if f.rotateErr != nil {
+		return "", contract.SessionInfo{}, f.rotateErr
+	}
 	info, err := f.Load(ctx, id, now)
 	if err != nil {
 		return "", info, err
@@ -190,5 +194,69 @@ func TestAuthenticateRotatesWhenPrivilegeChanges(t *testing.T) {
 	rotated, ok := sessions.valid[cookies[0].Value]
 	if !ok || rotated.PrivilegeChanged || rotated.PrivilegeVersion != rotated.CurrentPrivilegeVersion {
 		t.Fatal("rotated session must record the current privilege version")
+	}
+}
+
+func TestAuthenticateFailsClosedWhenRequiredPrivilegeRotationFails(t *testing.T) {
+	sessions := &fakeSessions{
+		valid:     map[string]contract.SessionInfo{},
+		rotateErr: context.DeadlineExceeded,
+	}
+	h := NewHandler(fakeUserRepo{User{ID: 1, Username: "alice", IsActive: true}}, sessions, fakeRenderer{}, false, session.DefaultConfig(), nil)
+	token, info, err := sessions.Create(context.Background(), 1, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	info.PrivilegeVersion = 0
+	info.CurrentPrivilegeVersion = 1
+	info.PrivilegeChanged = true
+	sessions.valid[token] = info
+
+	nextCalled := false
+	protected := h.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	protected.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d want=%d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if nextCalled {
+		t.Fatal("protected handler ran even though required rotation failed")
+	}
+}
+
+func TestAuthenticateRejectsPreviousTokenWithStalePrivilegeVersion(t *testing.T) {
+	sessions := &fakeSessions{valid: map[string]contract.SessionInfo{}}
+	h := NewHandler(fakeUserRepo{User{ID: 1, Username: "alice", IsActive: true}}, sessions, fakeRenderer{}, false, session.DefaultConfig(), nil)
+	token, info, err := sessions.Create(context.Background(), 1, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	info.IsCurrentID = false
+	info.PrivilegeVersion = 0
+	info.CurrentPrivilegeVersion = 1
+	info.PrivilegeChanged = true
+	sessions.valid[token] = info
+
+	nextCalled := false
+	protected := h.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	protected.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d want=%d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if nextCalled {
+		t.Fatal("protected handler ran with a stale privilege snapshot")
 	}
 }

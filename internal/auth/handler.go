@@ -110,16 +110,40 @@ func (h *Handler) Authenticate(next http.Handler) http.Handler {
 		// telah merotasi token yang sama, grace period tetap memungkinkan request ini.
 		// Rotasi dilakukan ketika interval tercapai atau versi hak akses user berubah.
 		// Rotasi tidak mengubah absolute_expires_at.
-		if info.IsCurrentID && (info.PrivilegeChanged || now.Sub(info.RotatedAt) >= h.sessionCfg.RotateInterval) {
+		needsRotation := info.PrivilegeChanged || now.Sub(info.RotatedAt) >= h.sessionCfg.RotateInterval
+		if info.PrivilegeChanged && !info.IsCurrentID {
+			// The presented token is the previous token from a concurrent rotation,
+			// but its privilege snapshot is stale again. The raw current token cannot
+			// be reconstructed from its stored hash, so do not serve this request.
+			h.logger.Warn("stale session privilege version on previous token")
+			http.Error(w, "Sesi perlu diperbarui. Coba lagi.", http.StatusServiceUnavailable)
+			return
+		}
+		if info.IsCurrentID && needsRotation {
 			newID, newInfo, rotateErr := h.sessions.Rotate(r.Context(), cookie.Value, now)
 			if rotateErr == nil {
 				info = newInfo
 				h.setSessionCookie(w, newID, info.AbsoluteExpiresAt.Sub(now))
 			} else {
+				// Another concurrent request may already have rotated this ID. In
+				// that case the old ID remains usable only during the configured grace
+				// period and Load reports IsCurrentID=false. If this ID is still current
+				// and rotation remains necessary, fail closed instead of serving a
+				// request with a session that should have been rotated.
 				latest, loadErr := h.sessions.Load(r.Context(), cookie.Value, now)
 				if loadErr != nil {
-					h.clearSessionCookie(w)
-					h.redirect(w, r, "/login")
+					if errors.Is(loadErr, session.ErrInvalid) {
+						h.clearSessionCookie(w)
+						h.redirect(w, r, "/login")
+					} else {
+						h.logger.Error("reload session after failed rotation")
+						http.Error(w, "Layanan sementara tidak tersedia.", http.StatusServiceUnavailable)
+					}
+					return
+				}
+				if latest.PrivilegeChanged || (latest.IsCurrentID && now.Sub(latest.RotatedAt) >= h.sessionCfg.RotateInterval) {
+					h.logger.Error("required session rotation failed")
+					http.Error(w, "Layanan sementara tidak tersedia.", http.StatusServiceUnavailable)
 					return
 				}
 				info = latest

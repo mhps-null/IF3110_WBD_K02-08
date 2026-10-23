@@ -22,6 +22,15 @@ type AccessibleDB struct {
 	Level AccessLevel
 }
 
+// Authorization revision contract:
+// users.privilege_version is a monotonically increasing per-user authorization
+// revision. Any metadata transaction that changes effective authorization must
+// increment it for each affected user in the same transaction. This includes
+// changes to users.is_platform_admin, group_members, and group_db_access; a
+// group_db_access change affects every current member of that group. P1 compares
+// this revision with sessions.privilege_version and rotates the Session ID when
+// they differ. This revision does not replace EffectiveLevel or route guards:
+// authorization must still be checked against current metadata on each request.
 type AccessChecker interface {
 	EffectiveLevel(ctx context.Context, userID, dbID int64) (AccessLevel, error)
 	ListAccessible(ctx context.Context, userID int64) ([]AccessibleDB, error)

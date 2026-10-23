@@ -2,12 +2,12 @@
 
 Scaffold fondasi P1: startup server, renderer `html/template`, login/logout, session berbasis metadata DB, CSRF, security headers, request logging yang tidak mencatat query/header/cookie, dan seed Platform Admin.
 
-> **Penting:** ini scaffold baru, bukan hasil merge ke repository kelompok. Sebelum integrasi, ganti module path, cocokkan `internal/contract` dengan kontrak yang dibekukan saat kickoff, dan pastikan nama/tipe kolom `users` serta `sessions` sama dengan `migrations_meta/` di repository resmi. Catatan integrasi rinci ada di `docs/p1-integration-notes.md`. File migration metadata tidak dibuat atau diubah di scaffold ini.
+> **Penting:** pastikan `internal/contract` dan skema metadata mengikuti keputusan integrasi tim. Migration `002_session_privilege_version.sql` menambah kolom otorisasi yang diperlukan P1; jangan mengubah migration `001` yang sudah dibekukan. Catatan integrasi dan kewajiban P2 untuk memperbarui versi otorisasi ada di `docs/p1-integration-notes.md`.
 
 ## Prasyarat
 
-- Go 1.23+
-- PostgreSQL dengan skema metadata Milestone 1 yang sudah diterapkan
+- Go 1.24.0 sesuai `go.mod`
+- PostgreSQL dengan skema metadata Milestone 1 yang sudah diterapkan, termasuk migration `002_session_privilege_version.sql`
 - Environment variables pada `.env.example` (ekspor secara manual atau gunakan pengelola environment)
 
 ## Jalankan
@@ -17,6 +17,7 @@ cp .env.example .env
 # Atur DATABASE_URL dan SESSION_SECRET, lalu ekspor variabel dari .env
 set -a; . ./.env; set +a
 go mod tidy
+# Jika database baru, terapkan migration metadata sesuai urutan di docs/auth-session.md
 go run ./cmd/seed
 go run ./cmd/server
 ```
@@ -38,7 +39,7 @@ Test yang memerlukan PostgreSQL:
 TEST_DATABASE_URL='postgres://.../database_test?sslmode=disable' go test -tags=integration ./internal/session ./internal/auth
 ```
 
-Saat ini test integrasi database belum diimplementasikan otomatis; perintah di atas adalah pengingat untuk tahap berikutnya, bukan jaminan bahwa test integrasi sudah tersedia.
+Integration test auth/session menggunakan database PostgreSQL yang ditentukan oleh `TEST_DATABASE_URL`; pastikan database pengujian memiliki schema `001` dan migration `002` sebelum menjalankan test dengan build tag `integration`.
 
 ## Scope P1 yang disiapkan
 

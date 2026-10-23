@@ -68,6 +68,11 @@ func TestAuthSessionIntegration(t *testing.T) {
 		t.Fatal("login did not create a session cookie")
 	}
 	token := cookies[0].Value
+	initialSession, err := store.Load(ctx, token, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("load new session: %v", err)
+	}
+	absoluteExpiresAt := initialSession.AbsoluteExpiresAt
 	protected := h.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := contract.PrincipalFrom(r.Context())
 		if !ok || p.UserID != userID {
@@ -101,6 +106,16 @@ func TestAuthSessionIntegration(t *testing.T) {
 		t.Fatalf("privilege change did not rotate session: status=%d cookies=%d", rec.Code, len(rotatedCookies))
 	}
 	token = rotatedCookies[0].Value
+	rotatedInfo, err := store.Load(ctx, token, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("load rotated session: %v", err)
+	}
+	if rotatedInfo.PrivilegeChanged || rotatedInfo.PrivilegeVersion != rotatedInfo.CurrentPrivilegeVersion {
+		t.Fatal("rotated session must capture the latest privilege version")
+	}
+	if !rotatedInfo.AbsoluteExpiresAt.Equal(absoluteExpiresAt) {
+		t.Fatal("privilege rotation must not extend absolute expiration")
+	}
 
 	now := time.Now().UTC()
 	newToken, _, err := store.Rotate(ctx, token, now)
@@ -113,7 +128,7 @@ func TestAuthSessionIntegration(t *testing.T) {
 	if _, err := store.Load(ctx, token, now.Add(cfg.GracePeriod+time.Second)); !errors.Is(err, session.ErrInvalid) {
 		t.Fatalf("old token after grace: %v", err)
 	}
-	req := httptest.NewRequest("POST", "/logout", nil)
+	req = httptest.NewRequest("POST", "/logout", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: newToken})
 	rec = httptest.NewRecorder()
 	h.Logout(rec, req.WithContext(ctx))

@@ -28,6 +28,9 @@ type SessionRevoker interface {
 }
 
 // SessionInfo represents authenticated session state without raw tokens.
+// PrivilegeVersion is the authorization revision captured by this session;
+// CurrentPrivilegeVersion is read from users.privilege_version. A mismatch
+// requires session-ID rotation before serving the protected request.
 type SessionInfo struct {
 	UserID                  int64
 	CreatedAt               time.Time
