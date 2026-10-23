@@ -1,0 +1,58 @@
+{{define "content"}}
+<div class="header-actions">
+  <div>
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span>/</span>
+      <a href="/databases">Databases</a>
+      <span>/</span>
+      <a href="/databases/{{.Data.DBID}}/migrations">DB #{{.Data.DBID}} Migrations</a>
+      <span>/</span>
+      <span>Editor Baru</span>
+    </div>
+    <h1>Buat Migration Baru</h1>
+    <p class="muted">Tulis atau tinjau query SQL untuk migrasi database target.</p>
+  </div>
+</div>
+
+{{if .Flash}}
+<div class="alert alert-success">{{.Flash}}</div>
+{{end}}
+{{if .Data.Error}}
+<div class="alert alert-error">{{.Data.Error}}</div>
+{{end}}
+
+<div class="panel narrow" style="max-width: 780px;">
+  <form method="post" action="/databases/{{.Data.DBID}}/migrations">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+
+    <div>
+      <label for="title">Judul Migration</label>
+      <input type="text" id="title" name="title" value="{{.Data.Title}}" placeholder="Contoh: Tambah tabel audit_logs dan indeks" required autofocus>
+      <small class="muted">Berikan deskripsi singkat dan jelas mengenai perubahan skema ini.</small>
+    </div>
+
+    <div style="margin-top: 1rem;">
+      <label for="sql_text">Query SQL</label>
+      <textarea id="sql_text" name="sql_text" rows="12" style="width: 100%; font-family: ui-monospace, monospace; padding: .75rem; border: 1px solid #b9c3cd; border-radius: .5rem; font-size: .875rem;" placeholder="CREATE TABLE contoh (&#10;    id serial PRIMARY KEY,&#10;    nama varchar(100) NOT NULL&#10;);" required>{{.Data.SQLText}}</textarea>
+      <small class="muted">Semua query akan dijalankan dalam blok transaksi atomik (COMMIT jika sukses, ROLLBACK jika gagal).</small>
+    </div>
+
+    <div style="margin-top: 1rem; padding: .75rem; background: #f8fafc; border: 1px solid #dfe4ea; border-radius: .5rem; font-size: .8125rem;">
+      <strong>Catatan Keamanan &amp; Integritas:</strong>
+      <ul style="margin: .35rem 0 0 1.25rem; padding: 0;">
+        <li>Statement yang tidak dapat berjalan di dalam transaksi (seperti <code>CREATE INDEX CONCURRENTLY</code>) akan ditolak.</li>
+        <li>Pada MySQL/MariaDB, statement DDL menyebabkan <em>implicit commit</em> otomatis.</li>
+        <li>Setelah disimpan, draft dapat di-review dan diuji dengan <code>EXPLAIN ANALYZE</code> sebelum benar-benar dieksekusi.</li>
+      </ul>
+    </div>
+
+    <div style="display: flex; gap: .75rem; margin-top: 1.5rem;">
+      <button type="submit" class="primary" style="flex: 1;">Simpan sebagai Draft</button>
+      <a href="/databases/{{.Data.DBID}}/migrations" style="text-decoration:none;">
+        <button type="button">Batal</button>
+      </a>
+    </div>
+  </form>
+</div>
+{{end}}

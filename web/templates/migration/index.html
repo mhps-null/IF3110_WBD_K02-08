@@ -1,0 +1,104 @@
+{{define "content"}}
+<div class="header-actions">
+  <div>
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span>/</span>
+      <a href="/databases">Databases</a>
+      <span>/</span>
+      <a href="/databases/{{.Data.DBID}}/schema">DB #{{.Data.DBID}}</a>
+      <span>/</span>
+      <span>Migrations</span>
+    </div>
+    <h1>Riwayat Database Migration</h1>
+    <p class="muted">Daftar linear riwayat perubahan struktur dan data skema pada database target.</p>
+  </div>
+  <div>
+    <a href="/databases/{{.Data.DBID}}/migrations/new" style="text-decoration:none;">
+      <button type="button" class="primary">+ Buat Migration Baru</button>
+    </a>
+  </div>
+</div>
+
+{{if .Flash}}
+<div class="alert alert-success">{{.Flash}}</div>
+{{end}}
+
+<div class="tabs">
+  <a href="/databases/{{.Data.DBID}}/schema" class="tab-link">Schema</a>
+  <a href="/databases/{{.Data.DBID}}/migrations" class="tab-link active">Migrations</a>
+</div>
+
+<div class="panel">
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Versi</th>
+          <th>Judul</th>
+          <th>Status</th>
+          <th>Dibuat Oleh</th>
+          <th>Waktu Dibuat</th>
+          <th>Dieksekusi</th>
+          <th>Checksum</th>
+          <th style="text-align: right;">Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Data.Migrations}}
+        <tr>
+          <td>
+            {{if .Version}}
+              <strong class="mono">v{{derefInt .Version}}</strong>
+            {{else}}
+              <span class="badge badge-view">Draft</span>
+            {{end}}
+          </td>
+          <td>
+            <strong>{{.Title}}</strong>
+          </td>
+          <td>
+            {{if eq .Status "success"}}
+              <span class="badge badge-edit">Success</span>
+            {{else if eq .Status "failed"}}
+              <span class="badge" style="background: #fee2e2; color: #991b1b;">Failed</span>
+            {{else}}
+              <span class="badge badge-view">Draft</span>
+            {{end}}
+          </td>
+          <td>{{if .CreatedByName}}{{.CreatedByName}}{{else}}User #{{.CreatedBy}}{{end}}</td>
+          <td>{{formatTime .CreatedAt}}</td>
+          <td>
+            {{if .ExecutedAt}}
+              {{formatTime .ExecutedAt}}
+              {{if .ExecutedByName}}<br><small class="muted">oleh {{.ExecutedByName}}</small>{{end}}
+            {{else}}
+              <span class="muted">-</span>
+            {{end}}
+          </td>
+          <td class="mono" style="font-size: 0.75rem;" title="{{deref .Checksum}}">
+            {{if .Checksum}}
+              {{slice (deref .Checksum) 0 8}}...
+            {{else}}
+              <span class="muted">-</span>
+            {{end}}
+          </td>
+          <td style="text-align: right;">
+            <a href="/databases/{{$.Data.DBID}}/migrations/{{.ID}}" style="text-decoration:none;">
+              <button type="button" class="btn-sm">Detail &amp; Review</button>
+            </a>
+          </td>
+        </tr>
+        {{else}}
+        <tr>
+          <td colspan="8" style="text-align: center; color: #5d6874; padding: 2.5rem;">
+            Belum ada migration yang tercatat untuk database ini.<br>
+            <a href="/databases/{{.Data.DBID}}/migrations/new" style="color: #164e8a; font-weight: 600;">Buat migration pertama Anda sekarang</a>.
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

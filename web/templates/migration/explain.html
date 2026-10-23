@@ -1,0 +1,119 @@
+{{define "content"}}
+<div class="header-actions">
+  <div>
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span>/</span>
+      <a href="/databases">Databases</a>
+      <span>/</span>
+      <a href="/databases/{{.Data.DBID}}/migrations">DB #{{.Data.DBID}} Migrations</a>
+      <span>/</span>
+      <a href="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}">Migration #{{.Data.Migration.ID}}</a>
+      <span>/</span>
+      <span>Query Execution Plan</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: .75rem;">
+      <h1>Hasil EXPLAIN Execution Plan</h1>
+      {{if .Data.Analyzed}}
+        <span class="badge badge-edit">EXPLAIN ANALYZE</span>
+      {{else}}
+        <span class="badge badge-view">EXPLAIN (Estimated)</span>
+      {{end}}
+    </div>
+    <p class="muted">Analisis rencana eksekusi database engine sebelum query di-commit ke sistem nyata.</p>
+  </div>
+  <div>
+    <a href="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}" style="text-decoration:none;">
+      <button type="button">Kembali ke Detail Migration</button>
+    </a>
+  </div>
+</div>
+
+{{if .Flash}}
+<div class="alert alert-success">{{.Flash}}</div>
+{{end}}
+
+<!-- Ringkasan Metrik Plan -->
+<div class="panel" style="margin-bottom: 1.5rem;">
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
+    <div style="padding: .75rem; background: #f8fafc; border-radius: .5rem; border: 1px solid #edf1f5;">
+      <span class="eyebrow">Estimated Total Cost</span>
+      <div style="font-size: 1.25rem; font-weight: 700; margin-top: .25rem; color: #164e8a;">
+        {{derefFloat .Data.Plan.Root.TotalCost}}
+      </div>
+    </div>
+    <div style="padding: .75rem; background: #f8fafc; border-radius: .5rem; border: 1px solid #edf1f5;">
+      <span class="eyebrow">Estimated Rows</span>
+      <div style="font-size: 1.25rem; font-weight: 700; margin-top: .25rem;">
+        {{.Data.Plan.Root.PlanRows}} rows
+      </div>
+    </div>
+    {{if .Data.Plan.PlanningMs}}
+    <div style="padding: .75rem; background: #f8fafc; border-radius: .5rem; border: 1px solid #edf1f5;">
+      <span class="eyebrow">Planning Time</span>
+      <div style="font-size: 1.25rem; font-weight: 700; margin-top: .25rem;">
+        {{derefFloat .Data.Plan.PlanningMs}} ms
+      </div>
+    </div>
+    {{end}}
+    {{if .Data.Plan.ExecutionMs}}
+    <div style="padding: .75rem; background: #f8fafc; border-radius: .5rem; border: 1px solid #edf1f5;">
+      <span class="eyebrow">Execution Time</span>
+      <div style="font-size: 1.25rem; font-weight: 700; margin-top: .25rem; color: #166534;">
+        {{derefFloat .Data.Plan.ExecutionMs}} ms
+      </div>
+    </div>
+    {{end}}
+  </div>
+</div>
+
+<!-- Tree / Detail Node Plan -->
+<div class="panel" style="margin-bottom: 1.5rem;">
+  <h3>Struktur Node Eksekusi</h3>
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Node Type (Metode Scan / Join)</th>
+          <th>Tabel / Relasi</th>
+          <th>Indeks yang Digunakan</th>
+          <th>Cost (Startup..Total)</th>
+          <th>Est. Rows</th>
+          <th>Actual Rows</th>
+          <th>Actual Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong style="color: #164e8a;">{{.Data.Plan.Root.NodeType}}</strong></td>
+          <td>{{if .Data.Plan.Root.Relation}}<code>{{.Data.Plan.Root.Relation}}</code>{{else}}-{{end}}</td>
+          <td>{{if .Data.Plan.Root.IndexName}}<code>{{.Data.Plan.Root.IndexName}}</code>{{else}}-{{end}}</td>
+          <td class="mono">{{derefFloat .Data.Plan.Root.StartupCost}} .. {{derefFloat .Data.Plan.Root.TotalCost}}</td>
+          <td>{{.Data.Plan.Root.PlanRows}}</td>
+          <td>{{if .Data.Plan.Root.ActualRows}}{{.Data.Plan.Root.ActualRows}}{{else}}-{{end}}</td>
+          <td>{{if .Data.Plan.Root.ActualTimeMs}}{{derefFloat .Data.Plan.Root.ActualTimeMs}} ms{{else}}-{{end}}</td>
+        </tr>
+        {{range .Data.Plan.Root.Children}}
+        <tr>
+          <td style="padding-left: 2rem;">-- {{.NodeType}}</td>
+          <td>{{if .Relation}}<code>{{.Relation}}</code>{{else}}-{{end}}</td>
+          <td>{{if .IndexName}}<code>{{.IndexName}}</code>{{else}}-{{end}}</td>
+          <td class="mono">{{derefFloat .StartupCost}} .. {{derefFloat .TotalCost}}</td>
+          <td>{{.PlanRows}}</td>
+          <td>{{if .ActualRows}}{{.ActualRows}}{{else}}-{{end}}</td>
+          <td>{{if .ActualTimeMs}}{{derefFloat .ActualTimeMs}} ms{{else}}-{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Raw Output JSON -->
+<div class="panel">
+  <h3>Raw Plan Output</h3>
+  <div style="background: #1e293b; color: #f8fafc; padding: 1rem; border-radius: .5rem; overflow-x: auto; font-family: ui-monospace, monospace; font-size: .8125rem; max-height: 350px;">
+    <pre style="margin: 0;">{{.Data.Plan.Raw}}</pre>
+  </div>
+</div>
+{{end}}
