@@ -1,0 +1,58 @@
+{{define "content"}}
+<div class="header-actions">
+  <div>
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span>/</span>
+      <a href="/databases">Databases</a>
+      <span>/</span>
+      <span>DB #{{.Data.DBID}} Schema</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: .75rem;">
+      <h1>Database Schema</h1>
+      <span class="badge badge-{{.Data.Engine}}">{{.Data.Engine}}</span>
+    </div>
+    <p class="muted">Overview of user tables introspected directly from target catalogs.</p>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Schema</th>
+          <th>Table Name</th>
+          <th>Columns</th>
+          <th>Constraints</th>
+          <th>Indexes</th>
+          <th style="text-align: right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Data.Snapshot.Tables}}
+        <tr>
+          <td class="mono">{{.Schema}}</td>
+          <td><strong>{{.Name}}</strong></td>
+          <td>{{len .Columns}}</td>
+          <td>{{len .Constraints}}</td>
+          <td>{{len .Indexes}}</td>
+          <td style="text-align: right; display: flex; justify-content: flex-end; gap: .5rem;">
+            <a href="/databases/{{$.Data.DBID}}/tables/{{.Name}}?schema={{.Schema}}" style="text-decoration:none;">
+              <button type="button" class="btn-sm">Structure</button>
+            </a>
+            <a href="/databases/{{$.Data.DBID}}/tables/{{.Name}}/data?schema={{.Schema}}" style="text-decoration:none;">
+              <button type="button" class="btn-sm primary">Browse Data</button>
+            </a>
+          </td>
+        </tr>
+        {{else}}
+        <tr>
+          <td colspan="6" style="text-align: center; color: #5d6874; padding: 2rem;">No user tables found in this database.</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

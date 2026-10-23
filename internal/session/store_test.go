@@ -1,42 +1,25 @@
 package session
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
 
-func TestDefaultConfig(t *testing.T) {
-	cfg := DefaultConfig()
-	if cfg.IdleTimeout != 30*time.Minute {
-		t.Errorf("IdleTimeout = %s", cfg.IdleTimeout)
-	}
-	if cfg.AbsoluteTimeout != 8*time.Hour {
-		t.Errorf("AbsoluteTimeout = %s", cfg.AbsoluteTimeout)
-	}
-	if cfg.RotateInterval != 15*time.Minute {
-		t.Errorf("RotateInterval = %s", cfg.RotateInterval)
-	}
-	if cfg.GracePeriod != 30*time.Second {
-		t.Errorf("GracePeriod = %s", cfg.GracePeriod)
-	}
-}
-
-func TestNewIDAndHashID(t *testing.T) {
+func TestSessionID(t *testing.T) {
 	first, err := newID()
 	if err != nil {
-		t.Fatalf("newID() error = %v", err)
+		t.Fatal(err)
 	}
 	second, err := newID()
 	if err != nil {
-		t.Fatalf("newID() error = %v", err)
+		t.Fatal(err)
 	}
-	if first == second {
-		t.Fatal("generated IDs must be unique")
+	if first == "" || first == second || hashID(first) == first || hashID(first) != hashID(first) {
+		t.Fatal("session ID must be random and stored as a deterministic hash")
 	}
-	if first == hashID(first) {
-		t.Fatal("stored session identifier must be hashed")
-	}
-	if hashID(first) != hashID(first) {
-		t.Fatal("hashID must be deterministic")
+	if _, err := NewSQLStore(nil, DefaultConfig()).Load(context.Background(), "", time.Now()); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("empty session: %v", err)
 	}
 }

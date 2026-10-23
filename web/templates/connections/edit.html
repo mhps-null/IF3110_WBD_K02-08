@@ -1,0 +1,87 @@
+{{define "content"}}
+<div class="header-actions">
+  <div>
+    <div class="breadcrumbs">
+      <a href="/">Home</a>
+      <span>/</span>
+      <a href="/admin/connections">Admin Connections</a>
+      <span>/</span>
+      <span>Edit #{{.Data.ID}}</span>
+    </div>
+    <h1>Edit Connection Profile</h1>
+    <p class="muted">Modify configuration parameters for connection #{{.Data.ID}} ({{.Data.Name}}).</p>
+  </div>
+</div>
+
+{{if .Flash}}
+<div class="alert alert-error">{{.Flash}}</div>
+{{end}}
+
+<div class="panel">
+  <form method="post" action="/admin/connections/{{.Data.ID}}/edit" id="connection-form">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="id" value="{{.Data.ID}}">
+    
+    <div class="form-row">
+      <div>
+        <label for="name">Profile Name</label>
+        <input type="text" id="name" name="name" value="{{.Data.Name}}" required>
+      </div>
+      <div>
+        <label for="engine">Engine</label>
+        <select id="engine" name="engine" required>
+          <option value="postgres" {{if eq .Data.Engine "postgres"}}selected{{end}}>PostgreSQL</option>
+          <option value="mysql" {{if eq .Data.Engine "mysql"}}selected{{end}}>MySQL</option>
+          <option value="mariadb" {{if eq .Data.Engine "mariadb"}}selected{{end}}>MariaDB</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label for="host">Host</label>
+        <input type="text" id="host" name="host" value="{{.Data.Host}}" required>
+      </div>
+      <div>
+        <label for="port">Port</label>
+        <input type="number" id="port" name="port" value="{{.Data.Port}}" min="1" max="65535" required>
+      </div>
+      <div>
+        <label for="database_name">Database Name</label>
+        <input type="text" id="database_name" name="database_name" value="{{.Data.DatabaseName}}" required>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" value="{{.Data.Username}}" required>
+      </div>
+      <div>
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="Leave blank to preserve current password">
+      </div>
+      <div>
+        <label for="sslmode">SSL Mode</label>
+        <select id="sslmode" name="sslmode">
+          <option value="disable" {{if eq .Data.SSLMode "disable"}}selected{{end}}>Disable</option>
+          <option value="require" {{if eq .Data.SSLMode "require"}}selected{{end}}>Require</option>
+          <option value="verify-ca" {{if eq .Data.SSLMode "verify-ca"}}selected{{end}}>Verify CA</option>
+          <option value="verify-full" {{if eq .Data.SSLMode "verify-full"}}selected{{end}}>Verify Full</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: .75rem; align-items: center; margin-top: 1.5rem;">
+      <button type="submit" class="primary">Update Connection</button>
+      <button type="button" id="btn-test-conn">Test Connection</button>
+      <a href="/admin/connections" style="text-decoration: none;">
+        <button type="button">Cancel</button>
+      </a>
+      <span id="test-result" style="font-size: .875rem; font-weight: 600;"></span>
+    </div>
+  </form>
+</div>
+
+<script src="/static/js/connections.js" defer></script>
+{{end}}
