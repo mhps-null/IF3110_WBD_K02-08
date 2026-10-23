@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/example/if3110-milestone1/internal/access"
+	"github.com/example/if3110-milestone1/internal/admin"
 	"github.com/example/if3110-milestone1/internal/auth"
 	"github.com/example/if3110-milestone1/internal/config"
 	"github.com/example/if3110-milestone1/internal/session"
@@ -55,6 +57,9 @@ func main() {
 	authHandler := auth.NewHandler(auth.NewSQLUsers(db), sessions, renderer, cfg.SessionCookieSecure, cfgSession, logger)
 
 	mux := http.NewServeMux()
+	guards := access.NewGuards(access.GuardsConfig{Checker: access.NewChecker(db)})
+	adminHandler := admin.NewHandler(admin.NewStore(db), sessions, nil, logger)
+	adminHandler.Routes(mux, authHandler.Authenticate, guards.Admin)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
