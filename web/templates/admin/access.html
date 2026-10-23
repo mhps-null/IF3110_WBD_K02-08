@@ -1,0 +1,52 @@
+{{define "content"}}
+<section class="panel">
+  <h1>Matriks Akses</h1>
+  <p class="muted">Atur level akses setiap group per database. Perubahan berlaku langsung pada request berikutnya.</p>
+  <nav class="admin-nav">
+    <a href="/admin/users">Users</a> ·
+    <a href="/admin/groups">Groups</a> ·
+    <a href="/admin/access">Access Matrix</a>
+  </nav>
+  {{if .Flash}}<p class="alert" role="alert">{{.Flash}}</p>{{end}}
+
+  {{if .Data.Rows}}
+  <div class="matrix">
+    {{range .Data.Rows}}
+    <form method="post" action="/admin/access" class="matrix-row">
+      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+      <input type="hidden" name="group_id" value="{{.Group.ID}}">
+      <div class="matrix-group"><strong>{{.Group.Name}}</strong></div>
+      <div class="matrix-cells" style="margin-top: 10px;">
+        {{range .Cells}}
+        <div class="matrix-cell" style="border: 1px solid #e2e8f0; padding: 15px; margin-bottom: 10px; border-radius: 6px; background: #f8fafc;">
+          <strong style="display: block; margin-bottom: 10px;">{{.DBName}}</strong>
+          
+          <div style="display: flex; gap: 20px; align-items: center;">
+            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+              <input type="radio" name="level_{{.DBID}}" value="" {{if eq .Level 0}}checked{{end}}> 
+              <span>None</span>
+            </label>
+            
+            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+              <input type="radio" name="level_{{.DBID}}" value="1" {{if eq .Level 1}}checked{{end}}> 
+              <span>View Only</span>
+            </label>
+            
+            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+              <input type="radio" name="level_{{.DBID}}" value="2" {{if eq .Level 2}}checked{{end}}> 
+              <span>View + Edit</span>
+            </label>
+          </div>
+          
+        </div>
+        {{end}}
+      </div>
+      <button type="submit" class="primary">Simpan</button>
+    </form>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="muted">Belum ada group atau database yang dapat diatur.</p>
+  {{end}}
+</section>
+{{end}}

@@ -1,0 +1,47 @@
+{{define "content"}}
+<section class="panel">
+  <h1>Kelola Group</h1>
+  <p class="muted">Group menentukan akses ke database. User memperoleh akses hanya melalui keanggotaan group.</p>
+  <nav class="admin-nav">
+    <a href="/admin/users">Users</a> ·
+    <a href="/admin/groups">Groups</a> ·
+    <a href="/admin/access">Access Matrix</a>
+  </nav>
+  {{if .Flash}}<p class="alert" role="alert">{{.Flash}}</p>{{end}}
+
+  <h2>Buat Group Baru</h2>
+  <form method="post" action="/admin/groups" class="stack">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label for="name">Nama</label>
+    <input id="name" name="name" type="text" required maxlength="100" autocomplete="off">
+    <label for="description">Deskripsi</label>
+    <input id="description" name="description" type="text" maxlength="255">
+    <button type="submit" class="primary">Buat Group</button>
+  </form>
+
+  <h2>Daftar Group</h2>
+  {{if .Data.Groups}}
+  <table class="data-table">
+    <thead><tr><th>Nama</th><th>Deskripsi</th><th>Aksi</th></tr></thead>
+    <tbody>
+      {{range .Data.Groups}}
+      <tr>
+        <td><a href="/admin/groups/{{.ID}}">{{.Name}}</a></td>
+        <td>{{.Description}}</td>
+        <td>
+          <a href="/admin/groups/{{.ID}}">Kelola anggota</a>
+          <form method="post" action="/admin/groups/{{.ID}}/delete" class="inline"
+                onsubmit="return confirm('Hapus group {{.Name}}? Semua keanggotaan dan akses group ini ikut terhapus.');">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <button type="submit" class="danger">Hapus</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">Belum ada group.</p>
+  {{end}}
+</section>
+{{end}}
