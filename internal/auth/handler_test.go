@@ -52,6 +52,10 @@ func (f *fakeSessions) Rotate(ctx context.Context, id string, now time.Time) (st
 		return "", info, err
 	}
 	delete(f.valid, id)
+	info.RotatedAt = now
+	info.IsCurrentID = true
+	info.PrivilegeVersion = info.CurrentPrivilegeVersion
+	info.PrivilegeChanged = false
 	f.valid[id+"-new"] = info
 	return id + "-new", info, nil
 }
@@ -153,5 +157,38 @@ func TestAuthenticateAndLogout(t *testing.T) {
 	h.Logout(rec, req)
 	if rec.Code != 303 || len(sessions.valid) != 0 || rec.Result().Cookies()[0].MaxAge != -1 {
 		t.Fatal("logout did not revoke session and clear cookie")
+	}
+}
+
+func TestAuthenticateRotatesWhenPrivilegeChanges(t *testing.T) {
+	sessions := &fakeSessions{valid: map[string]contract.SessionInfo{}}
+	h := NewHandler(fakeUserRepo{User{ID: 1, Username: "alice", IsActive: true}}, sessions, fakeRenderer{}, false, session.DefaultConfig(), nil)
+	token, info, err := sessions.Create(context.Background(), 1, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	info.PrivilegeVersion = 0
+	info.CurrentPrivilegeVersion = 1
+	info.PrivilegeChanged = true
+	sessions.valid[token] = info
+
+	protected := h.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	protected.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want=%d", rec.Code, http.StatusNoContent)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != sessionCookieName || cookies[0].Value == token {
+		t.Fatal("privilege change must rotate the session cookie")
+	}
+	rotated, ok := sessions.valid[cookies[0].Value]
+	if !ok || rotated.PrivilegeChanged || rotated.PrivilegeVersion != rotated.CurrentPrivilegeVersion {
+		t.Fatal("rotated session must record the current privilege version")
 	}
 }

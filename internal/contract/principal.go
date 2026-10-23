@@ -29,12 +29,15 @@ type SessionRevoker interface {
 
 // SessionInfo represents authenticated session state without raw tokens.
 type SessionInfo struct {
-	UserID            int64
-	CreatedAt         time.Time
-	LastSeenAt        time.Time
-	RotatedAt         time.Time
-	AbsoluteExpiresAt time.Time
-	IsCurrentID       bool
+	UserID                  int64
+	CreatedAt               time.Time
+	LastSeenAt              time.Time
+	RotatedAt               time.Time
+	AbsoluteExpiresAt       time.Time
+	PrivilegeVersion        int64 // versi hak akses saat session terakhir dirotasi
+	CurrentPrivilegeVersion int64 // versi hak akses user saat ini
+	PrivilegeChanged        bool  // true jika hak akses berubah sejak session dibuat/dirotasi
+	IsCurrentID             bool
 }
 
 type pageDataContextKey struct{}
@@ -54,4 +57,3 @@ type PageData struct {
 	Flash     string
 	Data      any
 }
-

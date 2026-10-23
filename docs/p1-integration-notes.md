@@ -1,8 +1,10 @@
 # Catatan integrasi P1 sebelum merge
 
 1. Ganti `github.com/example/if3110-milestone1` di `go.mod` dan seluruh import internal dengan module path repository kelompok.
-2. **Kontrak belum boleh dianggap final.** Scaffold `internal/contract` hanya draft minimum. Jika kontrak kickoff sudah di-commit, gunakan versi repository tersebut dan sesuaikan P1; jangan menimpa kontrak yang sudah dibekukan.
-3. Cocokkan kolom tabel `users` dan `sessions` dengan `migrations_meta/` yang disepakati. Scaffold ini sengaja tidak membuat atau mengubah skema metadata.
-4. P1 menyediakan `session.Store.Rotate`, tetapi rancangan kontrak bersama yang diberikan hanya menampilkan `SessionRevoker`. Agar P2 dapat meminta rotasi saat privilege dinaikkan tanpa mengimpor paket internal P1, tentukan interface rotator bersama saat integrasi. Jangan mengubah kontrak yang sudah dibekukan secara sepihak.
-5. Tambahkan integration test dengan database metadata test tersendiri untuk login sukses/gagal, session idle/absolute expiration, rotasi/grace period, revoke/logout, dan penolakan CSRF tanpa token. Test saat ini adalah unit test/fake; belum memverifikasi SQL terhadap PostgreSQL nyata.
-6. Setelah dependency dapat diunduh, jalankan `go mod tidy` untuk menghasilkan `go.sum`, lalu `go test ./...`, `go vet ./...`, dan `go build ./...` menggunakan driver pgx sebenarnya.
+2. Kontrak `internal/contract` dan skema metadata harus mengikuti hasil kickoff. Perubahan di sini adalah keputusan integrasi awal karena P2 belum mulai; sepakati sebelum P2 mengimplementasikan CRUD akses.
+3. Terapkan migration tambahan `migrations_meta/002_session_privilege_version.sql` setelah `001_initial_schema.sql` pada metadata database development dan database integration test.
+4. P1 membandingkan `sessions.privilege_version` dengan `users.privilege_version` pada setiap request terlindungi. Jika berbeda, session ID dirotasi pada request itu; absolute expiration tetap.
+5. **Kontrak wajib untuk P2:** setiap perubahan yang memengaruhi otorisasi pengguna harus menaikkan `users.privilege_version` untuk user yang terdampak, dalam transaksi yang sama. Ini termasuk perubahan `is_platform_admin`, keanggotaan `group_members`, dan akses grup melalui `group_db_access` (untuk perubahan akses grup, naikkan versi semua anggota grup terkait). Jangan naikkan versi hanya untuk perubahan nama/deskripsi group.
+6. P1 menyediakan `Store.Rotate` untuk rotasi token aktif. Rotasi otomatis berdasarkan `privilege_version` tidak membutuhkan P2 mengimpor paket internal P1.
+7. Tambahkan/pertahankan integration test dengan database metadata test tersendiri untuk login sukses/gagal, session idle/absolute expiration, rotasi/grace period, perubahan privilege, revoke/logout, dan penolakan CSRF tanpa token.
+8. Setelah dependency dapat diunduh dengan toolchain Go yang ditetapkan di `go.mod`, jalankan `go mod tidy`, `go test ./...`, `go vet ./...`, dan `go build ./...` menggunakan driver sebenarnya.

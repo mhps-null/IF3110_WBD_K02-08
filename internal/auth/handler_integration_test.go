@@ -87,6 +87,21 @@ func TestAuthSessionIntegration(t *testing.T) {
 			t.Fatalf("authentication status=%d", rec.Code)
 		}
 	}
+	// Changing the user's authorization version must rotate the active session
+	// on the next authenticated request, without a periodic-rotation delay.
+	if _, err := db.ExecContext(ctx, `UPDATE users SET privilege_version = privilege_version + 1 WHERE id = $1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec = httptest.NewRecorder()
+	protected.ServeHTTP(rec, req.WithContext(ctx))
+	rotatedCookies := rec.Result().Cookies()
+	if rec.Code != http.StatusNoContent || len(rotatedCookies) != 1 || rotatedCookies[0].Value == token {
+		t.Fatalf("privilege change did not rotate session: status=%d cookies=%d", rec.Code, len(rotatedCookies))
+	}
+	token = rotatedCookies[0].Value
+
 	now := time.Now().UTC()
 	newToken, _, err := store.Rotate(ctx, token, now)
 	if err != nil {

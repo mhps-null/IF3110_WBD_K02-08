@@ -108,7 +108,9 @@ func (h *Handler) Authenticate(next http.Handler) http.Handler {
 
 		// Rotasi token tidak memperpanjang absolute expiration. Jika request lain
 		// telah merotasi token yang sama, grace period tetap memungkinkan request ini.
-		if info.IsCurrentID && now.Sub(info.RotatedAt) >= h.sessionCfg.RotateInterval {
+		// Rotasi dilakukan ketika interval tercapai atau versi hak akses user berubah.
+		// Rotasi tidak mengubah absolute_expires_at.
+		if info.IsCurrentID && (info.PrivilegeChanged || now.Sub(info.RotatedAt) >= h.sessionCfg.RotateInterval) {
 			newID, newInfo, rotateErr := h.sessions.Rotate(r.Context(), cookie.Value, now)
 			if rotateErr == nil {
 				info = newInfo
