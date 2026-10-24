@@ -144,16 +144,66 @@ func TestAuthSessionIntegration(t *testing.T) {
 		advance time.Duration
 	}{
 		{"idle", cfg, cfg.IdleTimeout + time.Second},
-		{"absolute", session.Config{IdleTimeout: 24 * time.Hour, AbsoluteTimeout: time.Hour}, time.Hour + time.Second},
+		{
+			"absolute",
+			session.Config{
+				IdleTimeout:     24 * time.Hour,
+				AbsoluteTimeout: time.Hour,
+			},
+			time.Hour + time.Second,
+		},
 	} {
 		t.Run(tc.name+" expiry", func(t *testing.T) {
 			s := session.NewSQLStore(db, tc.cfg)
+
+			// Verify that the session store rejects an expired session.
 			id, _, err := s.Create(ctx, userID, now)
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			if _, err := s.Load(ctx, id, now.Add(tc.advance)); !errors.Is(err, session.ErrInvalid) {
 				t.Fatalf("expired session: %v", err)
+			}
+
+			// Create a separate session that is already expired at request time.
+			expiredID, _, err := s.Create(ctx, userID, now.Add(-tc.advance))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			expiryHandler := NewHandler(
+				NewSQLUsers(db),
+				s,
+				renderer,
+				false,
+				tc.cfg,
+				nil,
+			)
+
+			protectedReached := false
+			protected := expiryHandler.Authenticate(http.HandlerFunc(
+				func(w http.ResponseWriter, _ *http.Request) {
+					protectedReached = true
+					w.WriteHeader(http.StatusNoContent)
+				},
+			))
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.AddCookie(&http.Cookie{
+				Name:  sessionCookieName,
+				Value: expiredID,
+			})
+
+			rec := httptest.NewRecorder()
+			protected.ServeHTTP(rec, req.WithContext(ctx))
+
+			if rec.Code != http.StatusSeeOther || protectedReached {
+				t.Fatalf(
+					"expired session reached protected handler: status=%d reached=%v",
+					rec.Code,
+					protectedReached,
+				)
 			}
 		})
 	}

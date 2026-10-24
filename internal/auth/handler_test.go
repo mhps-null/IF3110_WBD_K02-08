@@ -377,3 +377,81 @@ func TestAuthenticateTransientUserLookupErrorPreservesSession(t *testing.T) {
 		t.Fatal("transient user lookup error revoked the session")
 	}
 }
+
+func TestAuthenticateRotatesPeriodically(t *testing.T) {
+	cfg := session.DefaultConfig()
+	sessions := &fakeSessions{
+		valid: map[string]contract.SessionInfo{},
+	}
+	h := NewHandler(
+		fakeUserRepo{
+			User{ID: 1, Username: "alice", IsActive: true},
+		},
+		sessions,
+		fakeRenderer{},
+		false,
+		cfg,
+		nil,
+	)
+
+	createdAt := time.Now().UTC()
+	token, info, err := sessions.Create(
+		context.Background(),
+		1,
+		createdAt,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	absoluteExpiration := info.AbsoluteExpiresAt
+
+	// Simulate a session whose rotation interval has elapsed.
+	info.RotatedAt = createdAt.Add(-cfg.RotateInterval - time.Second)
+	sessions.valid[token] = info
+
+	nextCalled := false
+	protected := h.Authenticate(http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+			w.WriteHeader(http.StatusNoContent)
+		},
+	))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  sessionCookieName,
+		Value: token,
+	})
+
+	rec := httptest.NewRecorder()
+	protected.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent || !nextCalled {
+		t.Fatalf(
+			"status=%d nextCalled=%v",
+			rec.Code,
+			nextCalled,
+		)
+	}
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 ||
+		cookies[0].Name != sessionCookieName ||
+		cookies[0].Value == token {
+		t.Fatal("session must rotate when the rotation interval has elapsed")
+	}
+
+	rotated, ok := sessions.valid[cookies[0].Value]
+	if !ok {
+		t.Fatal("rotated session was not stored")
+	}
+
+	if !rotated.RotatedAt.After(info.RotatedAt) {
+		t.Fatal("rotation timestamp was not updated")
+	}
+
+	if !rotated.AbsoluteExpiresAt.Equal(absoluteExpiration) {
+		t.Fatal("periodic rotation must not extend absolute expiration")
+	}
+}
