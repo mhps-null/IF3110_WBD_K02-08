@@ -11,24 +11,36 @@ import (
 )
 
 type Handler struct {
-	store *admin.Store
+	checker      contract.AccessChecker
 	introspector contract.Introspector
-	targetDB contract.TargetDB
-	renderer admin.Renderer
-	logger *slog.Logger
+	targetDB     contract.TargetDB
+	renderer     admin.Renderer
+	logger       *slog.Logger
 }
 
-func NewHandler(store *admin.Store, introspector contract.Introspector, targetDB contract.TargetDB, renderer admin.Renderer, logger *slog.Logger) *Handler {
+func NewHandler(checker contract.AccessChecker, introspector contract.Introspector, targetDB contract.TargetDB, renderer admin.Renderer, logger *slog.Logger) *Handler {
+	if checker == nil {
+		panic("schemadiff: NewHandler requires a non-nil AccessChecker")
+	}
+	if introspector == nil {
+		panic("schemadiff: NewHandler requires a non-nil Introspector")
+	}
+	if targetDB == nil {
+		panic("schemadiff: NewHandler requires a non-nil TargetDB")
+	}
+	if renderer == nil {
+		renderer = admin.NewTemplateRenderer("web/templates")
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	return &Handler{
-		store: store,
+		checker:      checker,
 		introspector: introspector,
-		targetDB: targetDB,
-		renderer: renderer,
-		logger: logger,
+		targetDB:     targetDB,
+		renderer:     renderer,
+		logger:       logger,
 	}
 }
 
@@ -44,7 +56,7 @@ func (h *Handler) Routes(mux *http.ServeMux, authenticate, viewDBGuard func(http
 
 type diffFormData struct {
 	SourceDBID int64
-	Databases []admin.Database
+	Databases  []contract.AccessibleDB
 }
 
 func (h *Handler) ShowDiffForm(w http.ResponseWriter, r *http.Request) {
@@ -54,10 +66,23 @@ func (h *Handler) ShowDiffForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbs, err := h.store.ListDatabases(r.Context())
+	principal, ok := contract.PrincipalFrom(r.Context())
+	if !ok {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	if !h.requireViewAccess(w, r, principal.UserID, sourceID) {
+		return
+	}
+
+	dbs, err := h.checker.ListAccessible(r.Context(), principal.UserID)
 	if err != nil {
-		h.logger.Error("schemadiff: list db failed")
+		h.logger.Error("schemadiff: list accessible databases failed", "user_id", principal.UserID)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	if _, found := findAccessibleDB(dbs, sourceID); !found {
+		http.Error(w, "Akses ditolak", http.StatusForbidden)
 		return
 	}
 
@@ -67,18 +92,24 @@ func (h *Handler) ShowDiffForm(w http.ResponseWriter, r *http.Request) {
 }
 
 type diffResultData struct {
-	SourceDBID int64
+	SourceDBID   int64
 	SourceDBName string
 	TargetDBName string
-	Changes []string
+	Changes      []string
 	GeneratedSQL string
-	Engine string
+	Engine       string
 }
 
 func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
 	sourceID, ok := parseID(r, "id")
 	if !ok {
 		http.NotFound(w, r)
+		return
+	}
+
+	principal, ok := contract.PrincipalFrom(r.Context())
+	if !ok {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
 
@@ -94,7 +125,27 @@ func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// dapetin koneksi ke database target
+	// Re-check authorization for both databases in the handler, not only in the
+	// route guard. The target ID comes from user-controlled form data and must be
+	// authorized before either database is opened or introspected.
+	if !h.requireViewAccess(w, r, principal.UserID, sourceID) || !h.requireViewAccess(w, r, principal.UserID, targetID) {
+		return
+	}
+
+	accessible, err := h.checker.ListAccessible(r.Context(), principal.UserID)
+	if err != nil {
+		h.logger.Error("schemadiff: list accessible databases failed", "user_id", principal.UserID)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	sourceAccess, sourceFound := findAccessibleDB(accessible, sourceID)
+	targetAccess, targetFound := findAccessibleDB(accessible, targetID)
+	if !sourceFound || !targetFound {
+		http.Error(w, "Akses ditolak", http.StatusForbidden)
+		return
+	}
+
+	// Open databases only after verifying the principal can view both.
 	sourceDB, engine, err := h.targetDB.Open(r.Context(), sourceID)
 	if err != nil {
 		h.logger.Error("schemadiff: open source db failed", "id", sourceID)
@@ -135,26 +186,14 @@ func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
 		formatted = append(formatted, FormatChange(c))
 	}
 
-	// cari nama database buat UI
-	var sourceName, targetName string
-	dbs, _ := h.store.ListDatabases(r.Context())
-	for _, d := range dbs {
-		if d.ID == sourceID {
-			sourceName = d.Name
-		}
-		if d.ID == targetID {
-			targetName = d.Name
-		}
-	}
-
 	h.render(w, r, "schemadiff/result.html", contract.PageData{
 		Data: diffResultData{
-			SourceDBID: sourceID,
-			SourceDBName: sourceName,
-			TargetDBName: targetName,
-			Changes: formatted,
+			SourceDBID:   sourceID,
+			SourceDBName: sourceAccess.Name,
+			TargetDBName: targetAccess.Name,
+			Changes:      formatted,
 			GeneratedSQL: sql,
-			Engine: string(engine),
+			Engine:       string(engine),
 		},
 	})
 }
@@ -163,11 +202,34 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, name string, da
 	p, _ := contract.PrincipalFrom(r.Context())
 	data.Principal = p
 	data.CSRFToken = csrfToken(r.Context())
-	
+
 	if err := h.renderer.Render(w, name, data); err != nil {
 		h.logger.Error("schemadiff: render failed", "template", name)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
+}
+
+func (h *Handler) requireViewAccess(w http.ResponseWriter, r *http.Request, userID, dbID int64) bool {
+	level, err := h.checker.EffectiveLevel(r.Context(), userID, dbID)
+	if err != nil {
+		h.logger.Error("schemadiff: access check failed", "user_id", userID, "database_id", dbID)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return false
+	}
+	if level < contract.AccessViewOnly {
+		http.Error(w, "Akses ditolak", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func findAccessibleDB(databases []contract.AccessibleDB, dbID int64) (contract.AccessibleDB, bool) {
+	for _, database := range databases {
+		if database.DBID == dbID && database.Level >= contract.AccessViewOnly {
+			return database, true
+		}
+	}
+	return contract.AccessibleDB{}, false
 }
 
 func parseID(r *http.Request, key string) (int64, bool) {

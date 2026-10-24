@@ -14,10 +14,10 @@
       {{$hasOption := false}}
       
       {{range .Data.Databases}}
-        {{if ne .ID $source}}
+        {{if ne .DBID $source}}
           {{$hasOption = true}}
           <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; cursor: pointer;">
-            <input type="radio" name="target_id" value="{{.ID}}" required>
+            <input type="radio" name="target_id" value="{{.DBID}}" required>
             <span>{{.Name}}</span>
           </label>
         {{end}}
