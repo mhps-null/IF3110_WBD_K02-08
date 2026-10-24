@@ -86,6 +86,7 @@ Route utama yang terdaftar pada server:
 | `GET`, `POST` | `/admin/connections` | Daftar dan tambah profil koneksi (Platform Admin) |
 | `GET` | `/databases` | Daftar database yang dapat diakses pengguna |
 | `GET` | `/databases/{id}/schema` | Lihat schema database |
+| `GET`, `POST` | `/databases/{id}/schema-diff` | Bandingkan schema dari dua database yang diizinkan dengan DBMS yang sama |
 | `GET` | `/databases/{id}/tables/{table}` | Lihat detail kolom tabel |
 | `GET` | `/databases/{id}/tables/{table}/data` | Lihat data tabel secara paginasi |
 | `GET`, `POST` | `/databases/{id}/migrations` | Riwayat dan pembuatan draft migration |

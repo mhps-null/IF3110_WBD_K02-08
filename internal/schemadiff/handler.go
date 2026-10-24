@@ -11,19 +11,24 @@ import (
 )
 
 type Handler struct {
-	checker      contract.AccessChecker
-	introspector contract.Introspector
-	targetDB     contract.TargetDB
-	renderer     admin.Renderer
-	logger       *slog.Logger
+	checker       contract.AccessChecker
+	introspectors map[contract.Engine]contract.Introspector
+	targetDB      contract.TargetDB
+	renderer      admin.Renderer
+	logger        *slog.Logger
 }
 
-func NewHandler(checker contract.AccessChecker, introspector contract.Introspector, targetDB contract.TargetDB, renderer admin.Renderer, logger *slog.Logger) *Handler {
+func NewHandler(checker contract.AccessChecker, introspectors map[contract.Engine]contract.Introspector, targetDB contract.TargetDB, renderer admin.Renderer, logger *slog.Logger) *Handler {
 	if checker == nil {
 		panic("schemadiff: NewHandler requires a non-nil AccessChecker")
 	}
-	if introspector == nil {
-		panic("schemadiff: NewHandler requires a non-nil Introspector")
+	if len(introspectors) == 0 {
+		panic("schemadiff: NewHandler requires at least one Introspector")
+	}
+	for engine, introspector := range introspectors {
+		if !supportedDiffEngine(engine) || introspector == nil {
+			panic("schemadiff: NewHandler received an invalid engine introspector")
+		}
 	}
 	if targetDB == nil {
 		panic("schemadiff: NewHandler requires a non-nil TargetDB")
@@ -35,17 +40,36 @@ func NewHandler(checker contract.AccessChecker, introspector contract.Introspect
 		logger = slog.Default()
 	}
 
+	introspectorCopy := make(map[contract.Engine]contract.Introspector, len(introspectors))
+	for engine, introspector := range introspectors {
+		introspectorCopy[engine] = introspector
+	}
+
 	return &Handler{
-		checker:      checker,
-		introspector: introspector,
-		targetDB:     targetDB,
-		renderer:     renderer,
-		logger:       logger,
+		checker:       checker,
+		introspectors: introspectorCopy,
+		targetDB:      targetDB,
+		renderer:      renderer,
+		logger:        logger,
 	}
 }
 
 // mendaftarkan route schema diff. Hanya user dengan akses ViewDB yg blh lihat.
 func (h *Handler) Routes(mux *http.ServeMux, authenticate, viewDBGuard func(http.Handler) http.Handler) {
+	if authenticate == nil {
+		authenticate = func(http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "authentication middleware not configured", http.StatusForbidden)
+			})
+		}
+	}
+	if viewDBGuard == nil {
+		viewDBGuard = func(http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "database access guard not configured", http.StatusForbidden)
+			})
+		}
+	}
 	wrap := func(handler http.HandlerFunc) http.Handler {
 		return authenticate(viewDBGuard(handler))
 	}
@@ -152,7 +176,9 @@ func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Gagal membuka database sumber", http.StatusInternalServerError)
 		return
 	}
-	defer sourceDB.Close()
+	// targetDB is a pool manager: Open returns a shared *sql.DB pool, not a
+	// request-owned connection. Do not Close it here; PoolManager owns its
+	// lifecycle and closes all cached pools during server shutdown.
 
 	targetDBConn, targetEngine, err := h.targetDB.Open(r.Context(), targetID)
 	if err != nil {
@@ -160,7 +186,7 @@ func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Gagal membuka database target", http.StatusInternalServerError)
 		return
 	}
-	defer targetDBConn.Close()
+	// Do not close targetDBConn for the same shared-pool ownership reason.
 
 	// The generated migration is submitted against the source database, so the
 	// target snapshot must use the same SQL dialect. Cross-engine translation is
@@ -179,15 +205,22 @@ func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ambil Snapshot
-	snapA, err := h.introspector.Snapshot(r.Context(), sourceDB)
+	introspector, ok := h.introspectors[sourceEngine]
+	if !ok || introspector == nil {
+		h.logger.Warn("schemadiff: introspector not configured", "engine", sourceEngine)
+		http.Error(w, "Introspector untuk DBMS ini belum dikonfigurasi.", http.StatusUnprocessableEntity)
+		return
+	}
+
+	// Read both schemas with the introspector matching the source/target engine.
+	snapA, err := introspector.Snapshot(r.Context(), sourceDB)
 	if err != nil {
 		h.logger.Error("schemadiff: snapshot source failed", "id", sourceID)
 		http.Error(w, "Gagal membaca schema sumber", http.StatusInternalServerError)
 		return
 	}
 
-	snapB, err := h.introspector.Snapshot(r.Context(), targetDBConn)
+	snapB, err := introspector.Snapshot(r.Context(), targetDBConn)
 	if err != nil {
 		h.logger.Error("schemadiff: snapshot target failed", "id", targetID)
 		http.Error(w, "Gagal membaca schema target", http.StatusInternalServerError)

@@ -13,6 +13,10 @@
       <span class="badge badge-{{.Data.Engine}}">{{.Data.Engine}}</span>
     </div>
     <p class="muted">Overview of user tables introspected directly from target catalogs.</p>
+    <p>
+      <a class="button" href="/databases/{{.Data.DBID}}/schema-diff">Compare Schema</a>
+      <a class="button" href="/databases/{{.Data.DBID}}/migrations">Migration History</a>
+    </p>
   </div>
 </div>
 

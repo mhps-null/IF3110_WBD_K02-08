@@ -20,6 +20,7 @@ import (
 	"github.com/example/if3110-milestone1/internal/dbdriver/mysql"
 	"github.com/example/if3110-milestone1/internal/dbdriver/postgres"
 	"github.com/example/if3110-milestone1/internal/migration"
+	"github.com/example/if3110-milestone1/internal/schemadiff"
 	"github.com/example/if3110-milestone1/internal/session"
 	"github.com/example/if3110-milestone1/internal/viewer"
 	"github.com/example/if3110-milestone1/internal/web"
@@ -102,6 +103,15 @@ func main() {
 	}
 	viewerHandler := viewer.NewMultiEngineHandler(poolManager, introspectors, checker, viewer.NewHTMLRenderer("web/templates"), guards)
 	viewerHandler.RegisterRoutesWithAuth(mux, authHandler.Authenticate)
+
+	schemaDiffHandler := schemadiff.NewHandler(
+		checker,
+		introspectors,
+		poolManager,
+		admin.NewTemplateRenderer("web/templates"),
+		logger,
+	)
+	schemaDiffHandler.Routes(mux, authHandler.Authenticate, guards.ViewDB)
 
 	migrationHandler := migration.NewHandler(
 		migration.NewService(migration.NewSQLRepository(db), poolManager),

@@ -40,7 +40,14 @@ func (f *schemaDiffAccessChecker) ListAccessible(context.Context, int64) ([]cont
 type schemaDiffTargetDB struct {
 	opens     []int64
 	engines   map[int64]contract.Engine
+	opened    []*sql.DB
 	allowOpen bool
+}
+
+func (f *schemaDiffTargetDB) closeOpened() {
+	for _, db := range f.opened {
+		_ = db.Close()
+	}
 }
 
 func (f *schemaDiffTargetDB) Open(_ context.Context, dbID int64) (*sql.DB, contract.Engine, error) {
@@ -56,6 +63,7 @@ func (f *schemaDiffTargetDB) Open(_ context.Context, dbID int64) (*sql.DB, contr
 	if err != nil {
 		return nil, "", err
 	}
+	f.opened = append(f.opened, db)
 	return db, engine, nil
 }
 
@@ -84,7 +92,9 @@ func (f *schemaDiffRenderer) Render(_ http.ResponseWriter, name string, data con
 }
 
 func newSchemaDiffTestHandler(checker contract.AccessChecker, target *schemaDiffTargetDB, renderer *schemaDiffRenderer) *Handler {
-	return NewHandler(checker, &schemaDiffIntrospector{}, target, renderer, nil)
+	return NewHandler(checker, map[contract.Engine]contract.Introspector{
+		contract.EnginePostgres: &schemaDiffIntrospector{},
+	}, target, renderer, nil)
 }
 
 func requestWithPrincipal(method, path string, body string, principal contract.Principal) *http.Request {
@@ -184,8 +194,12 @@ func TestDoDiffRejectsDifferentEnginesBeforeSnapshot(t *testing.T) {
 					2: tc.targetEngine,
 				},
 			}
+			targetCleanup := target
+			defer targetCleanup.closeOpened()
 			introspector := &schemaDiffIntrospector{}
-			h := NewHandler(checker, introspector, target, &schemaDiffRenderer{}, nil)
+			h := NewHandler(checker, map[contract.Engine]contract.Introspector{
+				contract.EnginePostgres: introspector,
+			}, target, &schemaDiffRenderer{}, nil)
 
 			r := requestWithPrincipal(http.MethodPost, "/databases/1/schema-diff", url.Values{"target_id": {"2"}}.Encode(), contract.Principal{UserID: 7, Username: "viewer"})
 			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -213,6 +227,62 @@ func TestSupportedDiffEngine(t *testing.T) {
 	}
 	if supportedDiffEngine(contract.Engine("oracle")) {
 		t.Fatal("unknown engine must not be treated as a supported schema diff dialect")
+	}
+}
+
+func TestDoDiffUsesIntrospectorForSelectedEngine(t *testing.T) {
+	for _, engine := range []contract.Engine{contract.EngineMySQL, contract.EngineMariaDB} {
+		t.Run(string(engine), func(t *testing.T) {
+			checker := &schemaDiffAccessChecker{
+				levels: map[int64]contract.AccessLevel{1: contract.AccessViewOnly, 2: contract.AccessViewOnly},
+				listed: []contract.AccessibleDB{
+					{DBID: 1, Name: "source", Level: contract.AccessViewOnly},
+					{DBID: 2, Name: "target", Level: contract.AccessViewOnly},
+				},
+			}
+			target := &schemaDiffTargetDB{
+				allowOpen: true,
+				engines:   map[int64]contract.Engine{1: engine, 2: engine},
+			}
+			defer target.closeOpened()
+
+			postgresIntrospector := &schemaDiffIntrospector{}
+			mysqlIntrospector := &schemaDiffIntrospector{}
+			h := NewHandler(checker, map[contract.Engine]contract.Introspector{
+				contract.EnginePostgres: postgresIntrospector,
+				contract.EngineMySQL:    mysqlIntrospector,
+				contract.EngineMariaDB:  mysqlIntrospector,
+			}, target, &schemaDiffRenderer{}, nil)
+
+			r := requestWithPrincipal(http.MethodPost, "/databases/1/schema-diff", url.Values{"target_id": {"2"}}.Encode(), contract.Principal{UserID: 7, Username: "viewer"})
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			h.DoDiff(w, r)
+
+			if w.Code != http.StatusInternalServerError {
+				t.Fatalf("status=%d, want %d; body=%q", w.Code, http.StatusInternalServerError, w.Body.String())
+			}
+			if postgresIntrospector.snapshotCalls != 0 {
+				t.Fatalf("PostgreSQL introspector used for %s", engine)
+			}
+			if mysqlIntrospector.snapshotCalls != 1 {
+				t.Fatalf("selected engine introspector snapshot calls=%d, want 1", mysqlIntrospector.snapshotCalls)
+			}
+		})
+	}
+}
+
+func TestRoutesFailClosedWhenMiddlewareMissing(t *testing.T) {
+	checker := &schemaDiffAccessChecker{}
+	h := newSchemaDiffTestHandler(checker, &schemaDiffTargetDB{}, &schemaDiffRenderer{})
+	mux := http.NewServeMux()
+	h.Routes(mux, nil, nil)
+
+	r := httptest.NewRequest(http.MethodGet, "/databases/1/schema-diff", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d, want %d", w.Code, http.StatusForbidden)
 	}
 }
 
