@@ -57,7 +57,7 @@ func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {
 
 	migrations, err := h.service.ListMigrations(r.Context(), dbID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Gagal memuat riwayat migration: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Gagal memuat riwayat migration.", http.StatusInternalServerError)
 		return
 	}
 
@@ -72,7 +72,7 @@ func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.renderer.Render(w, "migration/index.html", pageData); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Terjadi kesalahan internal.", http.StatusInternalServerError)
 	}
 }
 
@@ -99,7 +99,7 @@ func (h *Handler) NewMigrationPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.renderer.Render(w, "migration/new.html", pageData); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Terjadi kesalahan internal.", http.StatusInternalServerError)
 	}
 }
 
@@ -136,7 +136,7 @@ func (h *Handler) PrefillMigrationPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.renderer.Render(w, "migration/new.html", pageData); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Terjadi kesalahan internal.", http.StatusInternalServerError)
 	}
 }
 
@@ -157,26 +157,42 @@ func (h *Handler) CreateMigration(w http.ResponseWriter, r *http.Request) {
 
 	principal, _ := contract.PrincipalFrom(r.Context())
 
+	if title == "" {
+		h.renderCreateMigrationError(w, r, dbID, title, sqlText, principal, "Judul migration tidak boleh kosong.", http.StatusBadRequest)
+		return
+	}
+	if sqlText == "" {
+		h.renderCreateMigrationError(w, r, dbID, title, sqlText, principal, "Query SQL migration tidak boleh kosong.", http.StatusBadRequest)
+		return
+	}
+
 	m, err := h.service.CreateDraft(r.Context(), dbID, title, sqlText, principal.UserID)
 	if err != nil {
-		csrf, _ := contract.CSRFTokenFrom(r.Context())
-		pageData := contract.PageData{
-			Principal: principal,
-			CSRFToken: csrf,
-			Flash:     err.Error(),
-			Data: map[string]any{
-				"DBID":    dbID,
-				"Title":   title,
-				"SQLText": sqlText,
-				"Error":   err.Error(),
-			},
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		_ = h.renderer.Render(w, "migration/new.html", pageData)
+		h.renderCreateMigrationError(w, r, dbID, title, sqlText, principal, "Draft migration tidak dapat disimpan. Silakan coba lagi.", http.StatusInternalServerError)
 		return
 	}
 
 	http.Redirect(w, r, fmt.Sprintf("/databases/%d/migrations/%d", dbID, m.ID), http.StatusSeeOther)
+}
+
+func (h *Handler) renderCreateMigrationError(w http.ResponseWriter, r *http.Request, dbID int64, title, sqlText string, principal contract.Principal, message string, status int) {
+	csrf, _ := contract.CSRFTokenFrom(r.Context())
+	pageData := contract.PageData{
+		Principal: principal,
+		CSRFToken: csrf,
+		Flash:     message,
+		Data: map[string]any{
+			"DBID":    dbID,
+			"Title":   title,
+			"SQLText": sqlText,
+			"Error":   message,
+		},
+	}
+	w.WriteHeader(status)
+	if err := h.renderer.Render(w, "migration/new.html", pageData); err != nil {
+		// Never expose template or driver errors in the HTTP response.
+		_, _ = fmt.Fprintln(w, "Terjadi kesalahan internal.")
+	}
 }
 
 func (h *Handler) MigrationDetail(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +217,7 @@ func (h *Handler) MigrationDetail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Migration tidak ditemukan", http.StatusNotFound)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Terjadi kesalahan internal.", http.StatusInternalServerError)
 		return
 	}
 
@@ -216,7 +232,7 @@ func (h *Handler) MigrationDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.renderer.Render(w, "migration/detail.html", pageData); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Terjadi kesalahan internal.", http.StatusInternalServerError)
 	}
 }
 
@@ -307,7 +323,9 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	_ = h.renderer.Render(w, "migration/detail.html", pageData)
+	if err := h.renderer.Render(w, "migration/detail.html", pageData); err != nil {
+		http.Error(w, "Terjadi kesalahan internal.", http.StatusInternalServerError)
+	}
 }
 
 func (h *Handler) ExplainMigration(w http.ResponseWriter, r *http.Request) {
@@ -364,6 +382,6 @@ func (h *Handler) ExplainMigration(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.renderer.Render(w, "migration/explain.html", pageData); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Terjadi kesalahan internal.", http.StatusInternalServerError)
 	}
 }

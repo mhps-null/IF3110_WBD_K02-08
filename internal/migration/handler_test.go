@@ -2,9 +2,11 @@ package migration
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -334,5 +336,127 @@ func TestHandlersRejectMigrationFromDifferentDatabase(t *testing.T) {
 				t.Fatalf("handler rendered %q for a migration from another database", renderer.lastTemplate)
 			}
 		})
+	}
+}
+
+type listErrorService struct {
+	Service
+	err error
+}
+
+func (s listErrorService) ListMigrations(context.Context, int64) ([]*Migration, error) {
+	return nil, s.err
+}
+
+type createDraftErrorService struct {
+	Service
+	err error
+}
+
+func (s createDraftErrorService) CreateDraft(context.Context, int64, string, string, int64) (*Migration, error) {
+	return nil, s.err
+}
+
+type failingMigrationRenderer struct{ err error }
+
+func (r failingMigrationRenderer) Render(http.ResponseWriter, string, contract.PageData) error {
+	return r.err
+}
+
+func TestHandlerListMigrationsDoesNotExposeInternalError(t *testing.T) {
+	h, svc, _ := setupTestHandler()
+	secret := "postgres password=do-not-disclose host=metadata.internal"
+	h.service = listErrorService{Service: svc, err: errors.New(secret)}
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	req := httptest.NewRequest(http.MethodGet, "/databases/1/migrations", nil)
+	req = withUserPrincipal(req, 1, "alice")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if strings.Contains(rec.Body.String(), secret) || strings.Contains(rec.Body.String(), "do-not-disclose") {
+		t.Fatalf("internal error leaked to response: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Gagal memuat riwayat migration.") {
+		t.Fatalf("generic error message missing: %s", rec.Body.String())
+	}
+}
+
+func TestHandlerCreateMigrationDoesNotExposeInternalError(t *testing.T) {
+	h, svc, renderer := setupTestHandler()
+	secret := "postgres password=do-not-disclose host=metadata.internal"
+	h.service = createDraftErrorService{Service: svc, err: errors.New(secret)}
+
+	form := url.Values{
+		"title":    {"Valid title"},
+		"sql_text": {"SELECT 1;"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/databases/1/migrations", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("id", "1")
+	req = withUserPrincipal(req, 1, "alice")
+	rec := httptest.NewRecorder()
+	h.CreateMigration(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if strings.Contains(rec.Body.String(), "do-not-disclose") {
+		t.Fatalf("internal error leaked in response body: %s", rec.Body.String())
+	}
+	data, ok := renderer.lastData.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("template data has unexpected type %T", renderer.lastData.Data)
+	}
+	errorMessage, ok := data["Error"].(string)
+	if !ok {
+		t.Fatalf("template error data has unexpected type %T", data["Error"])
+	}
+	if strings.Contains(renderer.lastData.Flash, "do-not-disclose") || strings.Contains(errorMessage, "do-not-disclose") {
+		t.Fatal("internal service error leaked into template data")
+	}
+	if renderer.lastData.Flash != "Draft migration tidak dapat disimpan. Silakan coba lagi." {
+		t.Fatalf("unexpected safe flash message: %q", renderer.lastData.Flash)
+	}
+}
+
+func TestHandlerRendererErrorDoesNotExposeInternalError(t *testing.T) {
+	h, _, _ := setupTestHandler()
+	secret := "template path=/private/application/source password=do-not-disclose"
+	h.renderer = failingMigrationRenderer{err: errors.New(secret)}
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	req := httptest.NewRequest(http.MethodGet, "/databases/1/migrations/new", nil)
+	req = withUserPrincipal(req, 1, "alice")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if strings.Contains(rec.Body.String(), "do-not-disclose") || strings.Contains(rec.Body.String(), "/private/application/source") {
+		t.Fatalf("renderer error leaked to response: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Terjadi kesalahan internal.") {
+		t.Fatalf("generic renderer error missing: %s", rec.Body.String())
+	}
+}
+
+func TestMigrationDetailTemplateDoesNotExposeStoredInternalError(t *testing.T) {
+	source, err := os.ReadFile("../../web/templates/migration/detail.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	templateText := string(source)
+	if strings.Contains(templateText, "deref .Data.Migration.ErrorMessage") {
+		t.Fatal("migration detail template renders the raw stored error message")
+	}
+	if !strings.Contains(templateText, "Detail teknis disimpan pada metadata internal dan tidak ditampilkan pada halaman ini.") {
+		t.Fatal("generic migration error message is missing from the detail template")
 	}
 }
