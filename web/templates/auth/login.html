@@ -2,7 +2,6 @@
 <section class="panel narrow">
   <h1>Masuk</h1>
   <p class="muted">Masuk menggunakan akun platform yang terdaftar.</p>
-  {{if .Flash}}<p class="alert" role="alert">{{.Flash}}</p>{{end}}
   <form method="post" action="/login" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <label for="username">Username</label>

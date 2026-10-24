@@ -18,6 +18,11 @@
     {{end}}
   </header>
   <main class="container">
+    {{if .Flash}}
+      {{$kind := .FlashKind}}
+      {{if not $kind}}{{$kind = "info"}}{{end}}
+      <div class="flash-message {{if eq $kind "success"}}flash-success{{else if eq $kind "error"}}flash-error{{else}}flash-info{{end}}" role="{{if eq $kind "error"}}alert{{else}}status{{end}}">{{.Flash}}</div>
+    {{end}}
     {{template "content" .}}
   </main>
 </body>

@@ -1,55 +1,142 @@
-# IF3110 Milestone 1 — P1 Foundation Scaffold
+# IF3110 Milestone 1 — P1 Foundation, Authentication, and Session
 
-Scaffold fondasi P1: startup server, renderer `html/template`, login/logout, session berbasis metadata DB, CSRF, security headers, request logging yang tidak mencatat query/header/cookie, dan seed Platform Admin.
-
-> **Penting:** ini scaffold baru, bukan hasil merge ke repository kelompok. Sebelum integrasi, ganti module path, cocokkan `internal/contract` dengan kontrak yang dibekukan saat kickoff, dan pastikan nama/tipe kolom `users` serta `sessions` sama dengan `migrations_meta/` di repository resmi. Catatan integrasi rinci ada di `docs/p1-integration-notes.md`. File migration metadata tidak dibuat atau diubah di scaffold ini.
+Dokumentasi implementasi P1 untuk fondasi aplikasi Database Management Platform. Cakupan P1 meliputi konfigurasi aplikasi, seed Platform Admin, autentikasi, session berbasis PostgreSQL, proteksi CSRF, template HTML, flash message, logging aman, dan security headers.
 
 ## Prasyarat
 
-- Go 1.23+
-- PostgreSQL dengan skema metadata Milestone 1 yang sudah diterapkan
-- Environment variables pada `.env.example` (ekspor secara manual atau gunakan pengelola environment)
+- Go sesuai versi yang ditentukan di `go.mod`.
+- PostgreSQL untuk metadata aplikasi.
+- `psql` untuk menerapkan migration metadata.
+- OpenSSL untuk menghasilkan secret acak (atau generator kriptografis lain yang sesuai).
 
-## Jalankan
+## 1. Konfigurasi
+
+Buat file konfigurasi lokal:
 
 ```bash
 cp .env.example .env
-# Atur DATABASE_URL dan SESSION_SECRET, lalu ekspor variabel dari .env
-set -a; . ./.env; set +a
-go mod tidy
+```
+
+Edit `.env` dan isi setidaknya:
+
+- `DATABASE_URL`: DSN PostgreSQL metadata aplikasi.
+- `SESSION_SECRET`: secret acak minimal 32 karakter.
+- `SEED_ADMIN_USERNAME`: username Platform Admin awal.
+- `SEED_ADMIN_PASSWORD`: password awal minimal 14 karakter dan bukan password placeholder.
+
+Untuk lingkungan lokal melalui HTTP, `APP_ENV=development` dan `SESSION_COOKIE_SECURE=false` dapat digunakan. Dalam produksi, aplikasi mensyaratkan `APP_ENV=production` dan `SESSION_COOKIE_SECURE=true`, serta harus berjalan di belakang terminasi TLS yang benar.
+
+Buat secret dengan:
+
+```bash
+openssl rand -hex 32
+```
+
+Masukkan hasilnya sebagai nilai `SESSION_SECRET` di `.env`. Jangan commit `.env` atau membagikan isi konfigurasi yang mengandung kredensial.
+
+Muat environment variables ke shell:
+
+```bash
+set -a
+source ./.env
+set +a
+```
+
+## 2. Migration metadata
+
+Untuk database metadata baru atau database yang belum memiliki skema, terapkan migration secara berurutan:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/001_initial_schema.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/002_session_privilege_version.sql
+```
+
+Jangan menerapkan ulang migration awal pada database yang sudah memiliki skema tanpa memeriksa keadaan database terlebih dahulu. Migration `002` menambahkan snapshot versi privilege yang digunakan untuk validasi dan rotasi session.
+
+Rincian lifecycle session dan kontrak integrasi privilege tersedia di `docs/auth-session.md` dan `docs/p1-integration-notes.md`.
+
+## 3. Seed Platform Admin dan jalankan server
+
+Pastikan `.env` sudah dimuat ke shell, database dapat diakses, dan migration sudah diterapkan. Kemudian jalankan:
+
+```bash
 go run ./cmd/seed
 go run ./cmd/server
 ```
 
-Buka `http://localhost:8080`. Untuk HTTPS/production, set `APP_ENV=production` dan `SESSION_COOKIE_SECURE=true` di belakang terminasi TLS yang benar.
+Seed membuat Platform Admin awal jika username belum ada. Jika username tersebut sudah ada, seed tidak mengubah password atau privilege akun yang sudah ada.
 
-## Verifikasi
+Server menggunakan alamat dari `ADDR`, dengan nilai default `:8080`. Buka `http://localhost:8080` untuk mengakses aplikasi lokal.
+
+Endpoint dasar yang tersedia pada implementasi P1:
+
+| Method | Route | Fungsi |
+|---|---|---|
+| `GET` | `/healthz` | Health check |
+| `GET` | `/login` | Halaman login |
+| `POST` | `/login` | Memproses login dengan CSRF |
+| `GET` | `/` | Beranda dengan autentikasi |
+| `POST` | `/logout` | Logout dengan autentikasi dan CSRF |
+
+## 4. Verifikasi unit test dan build
+
+Jalankan dari root repo:
 
 ```bash
-gofmt -w ./cmd ./internal
 go test ./...
 go vet ./...
 go build ./...
 ```
 
-Test yang memerlukan PostgreSQL:
+## 5. Integration test
+
+Integration test autentikasi, session, dan CSRF tersedia melalui build tag `integration`.
+
+Gunakan database PostgreSQL khusus pengujian melalui `TEST_DATABASE_URL`. **Jangan gunakan database development atau database produksi sebagai database test**, karena test membuat dan menghapus data pengguna.
+
+Isi `TEST_DATABASE_URL` di `.env` dengan DSN yang menunjuk ke database pengujian terpisah. Muat ulang environment variables:
 
 ```bash
-TEST_DATABASE_URL='postgres://.../database_test?sslmode=disable' go test -tags=integration ./internal/session ./internal/auth
+set -a
+source ./.env
+set +a
 ```
 
-Saat ini test integrasi database belum diimplementasikan otomatis; perintah di atas adalah pengingat untuk tahap berikutnya, bukan jaminan bahwa test integrasi sudah tersedia.
+Pada database test yang belum memiliki skema, terapkan migration yang sama:
 
-## Scope P1 yang disiapkan
+```bash
+psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/001_initial_schema.sql
+psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/002_session_privilege_version.sql
+```
 
-- `cmd/server/main.go`: composition root
-- `cmd/seed/main.go`: seed Platform Admin pertama
-- `internal/contract/`: kontrak principal dan session revocation (draft sementara)
-- `internal/password/`: wrapper `Hash` dan `Verify`
-- `internal/session/`: store dan lifecycle session berbasis PostgreSQL
-- `internal/auth/`: handler login/logout
-- `internal/web/`: router, template renderer, CSRF, security headers, logging
-- `web/templates/`, `web/static/`: halaman dan CSS dasar
-- `docs/auth-session.md`: parameter session
+Jalankan integration test:
 
-Belum termasuk modul P2/P3/P4, policy authorization final, CRUD admin, koneksi database target, viewer, maupun migration executor.
+```bash
+go test -tags=integration -v ./internal/auth ./internal/session ./internal/web
+```
+
+Pastikan kedua test yang memerlukan database, yaitu `TestAuthSessionIntegration` dan `TestRevokeAllForUserIntegration`, benar-benar berjalan dan tidak berstatus `SKIP`.
+
+## 6. Cakupan P1
+
+- `cmd/server/`: composition root dan HTTP server.
+- `cmd/seed/`: seed Platform Admin awal.
+- `internal/config/`: validasi konfigurasi lingkungan.
+- `internal/password/`: hashing dan verifikasi password.
+- `internal/session/`: store PostgreSQL, expiry, rotasi, grace period, dan revokasi session.
+- `internal/auth/`: login, logout, autentikasi middleware, dan penanganan error.
+- `internal/web/`: renderer, CSRF, flash message, logging, dan security headers.
+- `internal/contract/`: kontrak identitas, session, dan data halaman.
+- `web/templates/` dan `web/static/`: template HTML dan CSS.
+- `docs/auth-session.md`: dokumentasi lifecycle session.
+
+Cakupan implementasi P1 ini belum mencakup seluruh modul akses database, koneksi database target, database viewer, administrasi user/group, dan migration executor yang menjadi bagian pekerjaan P2, P3, dan P4.
+
+## 7. Keamanan konfigurasi
+
+- Jangan commit `.env`, kredensial database, atau secret aplikasi.
+- Gunakan database khusus untuk integration test.
+- Password dan Session ID tidak boleh dicatat ke log.
+- Cookie session menggunakan `HttpOnly` dan `SameSite=Lax`, serta `Secure` sesuai konfigurasi.
+- Pesan flash ditandatangani, tetapi tidak dienkripsi. Isinya dapat dibaca client; gunakan hanya pesan teks tetap yang tidak sensitif.
+- Pada produksi, aktifkan `SESSION_COOKIE_SECURE=true` dan gunakan HTTPS.
