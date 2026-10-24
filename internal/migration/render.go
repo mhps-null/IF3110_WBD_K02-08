@@ -46,6 +46,15 @@ func (r *HTMLRenderer) Render(w http.ResponseWriter, templateRelativePath string
 			}
 			return fmt.Sprintf("%.2f", *f)
 		},
+		"actualRows": func(node contract.PlanNode) string {
+			if node.ActualRowsPerLoop != nil {
+				return fmt.Sprintf("%g", *node.ActualRowsPerLoop)
+			}
+			if node.ActualRows != nil {
+				return fmt.Sprintf("%d", *node.ActualRows)
+			}
+			return "—"
+		},
 		"formatTime": func(t *time.Time) string {
 			if t == nil || t.IsZero() {
 				return "-"

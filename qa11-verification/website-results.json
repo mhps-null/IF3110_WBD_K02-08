@@ -1,0 +1,76 @@
+[
+  {
+    "test": "1. Identitas schema+table",
+    "status": "PASS",
+    "sql": "ALTER TABLE \"qa11_a\".\"items\" ADD COLUMN \"catatan\" text;"
+  },
+  {
+    "test": "2a. Identifier PostgreSQL",
+    "status": "PASS",
+    "sql": "CREATE TABLE \"qa11_a\".\"order \"\"demo\"\"\" (\n  \"select\" integer,\n  \"nama kolom\" text,\n  \"kutip\"\"kolom\" text\n);\n\nALTER TABLE \"qa11_a\".\"items\" ADD COLUMN \"catatan\" text;"
+  },
+  {
+    "test": "2b. Identifier MariaDB + namespace sumber",
+    "status": "PASS",
+    "sql": "CREATE TABLE `if3110_step11_a`.`qa11_order``demo` (\n  `select` int(11) DEFAULT NULL,\n  `nama kolom` text DEFAULT NULL,\n  `kutip``kolom` text DEFAULT NULL\n);"
+  },
+  {
+    "test": "2b. Eksekusi kandidat MariaDB melalui migration website",
+    "status": "PASS",
+    "migration": 5,
+    "version": 1
+  },
+  {
+    "test": "2b. Diff ulang MariaDB setelah eksekusi",
+    "status": "PASS",
+    "result": "Schema sudah sesuai"
+  },
+  {
+    "test": "4. Aturan foreign key MariaDB",
+    "status": "PASS",
+    "sql": "-- WARNING: DESTRUCTIVE CHANGE\nALTER TABLE `if3110_step11_a`.`qa11_child` DROP FOREIGN KEY `qa11_fk`;\n\nALTER TABLE `if3110_step11_a`.`qa11_child` ADD CONSTRAINT `qa11_fk` FOREIGN KEY (`parent_id`) REFERENCES `if3110_step11_a`.`qa11_parent` (`id`) ON DELETE CASCADE ON UPDATE SET NULL;"
+  },
+  {
+    "test": "4. Eksekusi FK melalui website",
+    "status": "PASS",
+    "migrations": [
+      6,
+      7
+    ],
+    "versions": [
+      2,
+      3
+    ]
+  },
+  {
+    "test": "4. Diff ulang FK MariaDB",
+    "status": "PASS",
+    "result": "Schema sudah sesuai"
+  },
+  {
+    "test": "3. Predicate partial index PostgreSQL",
+    "status": "PASS",
+    "sql": "CREATE TABLE \"qa11_a\".\"order \"\"demo\"\"\" (\n  \"select\" integer,\n  \"nama kolom\" text,\n  \"kutip\"\"kolom\" text\n);\n\nDROP INDEX \"qa11_a\".\"qa11_partial\";\n\nALTER TABLE \"qa11_a\".\"items\" ADD COLUMN \"catatan\" text;\n\nCREATE INDEX \"qa11_partial\" ON \"qa11_a\".\"items\" USING btree (id) WHERE (id > 10);"
+  },
+  {
+    "test": "1–3. Eksekusi kandidat PostgreSQL melalui website",
+    "status": "PASS",
+    "migration": 8,
+    "version": 1
+  },
+  {
+    "test": "1–3. Diff ulang PostgreSQL",
+    "status": "PASS",
+    "result": "Schema sudah sesuai"
+  },
+  {
+    "test": "5. Golden test PostgreSQL, MySQL, MariaDB",
+    "status": "PASS",
+    "command": "go test -mod=readonly -v -count=1 ./internal/schemadiff",
+    "details": [
+      "TestGenerateSQLGolden/postgres PASS",
+      "TestGenerateSQLGolden/mysql PASS",
+      "TestGenerateSQLGolden/mariadb PASS"
+    ]
+  }
+]

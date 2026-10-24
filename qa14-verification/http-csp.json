@@ -1,0 +1,22 @@
+{
+  "/login": {
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "csp": "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:"
+  },
+  "/static/css/app.css": {
+    "status": 200,
+    "content_type": "text/css; charset=utf-8",
+    "csp": "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:"
+  },
+  "/static/js/app.js": {
+    "status": 200,
+    "content_type": "text/javascript; charset=utf-8",
+    "csp": "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:"
+  },
+  "/static/js/connections.js": {
+    "status": 200,
+    "content_type": "text/javascript; charset=utf-8",
+    "csp": "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:"
+  }
+}

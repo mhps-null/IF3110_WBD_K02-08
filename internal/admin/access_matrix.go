@@ -72,9 +72,9 @@ func (h *Handler) ShowMatrix(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SetAccess nyimpen satu baris matriks (satu group, semua database)
-// Form berisi group_id + field level_<dbID> utk setiap database yg ditampilkan
-// Store udh idempoten dan hanya bump privilege_version kalo level bener2 berubah
+// SetAccess nyimpen satu baris matriks (satu group, semua database).
+// Form berisi group_id + field level_<dbID> utk setiap database yg ditampilkan.
+// Seluruh level dan ID divalidasi ketat dan disimpan dalam satu transaksi atomik.
 func (h *Handler) SetAccess(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
@@ -88,37 +88,46 @@ func (h *Handler) SetAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	entries := make(map[int64]int)
 	for key, values := range r.PostForm {
-		if !strings.HasPrefix(key, "level_") || len(values) == 0 {
+		if key == "csrf_token" || key == "group_id" {
 			continue
+		}
+
+		if !strings.HasPrefix(key, "level_") || len(values) != 1 {
+			redirect(w, r, "/admin/access?flash=error")
+			return
 		}
 
 		dbIDStr := strings.TrimPrefix(key, "level_")
 		dbID, err := strconv.ParseInt(dbIDStr, 10, 64)
 		if err != nil || dbID <= 0 {
-			continue
-		}
-
-		raw := values[0]
-		if raw == "" {
-			if err := h.store.RemoveGroupAccess(r.Context(), groupID, dbID); err != nil {
-				h.logger.Error("matrix: remove access failed")
-				redirect(w, r, "/admin/access?flash=error")
-				return
-			}
-			continue
-		}
-
-		level, err := strconv.Atoi(raw)
-		if err != nil || (level != 1 && level != 2) {
-			continue
-		}
-
-		if err := h.store.SetGroupAccess(r.Context(), groupID, dbID, level); err != nil {
-			h.logger.Error("matrix: set access failed")
 			redirect(w, r, "/admin/access?flash=error")
 			return
 		}
+
+		raw := values[0]
+		var level int
+		switch raw {
+		case "", "0":
+			level = 0
+		case "1":
+			level = 1
+		case "2":
+			level = 2
+		default:
+			redirect(w, r, "/admin/access?flash=error")
+			return
+		}
+
+		entries[dbID] = level
 	}
+
+	if err := h.store.SetGroupAccessLevels(r.Context(), groupID, entries); err != nil {
+		h.logger.Error("matrix: set access failed", "error", err)
+		redirect(w, r, "/admin/access?flash=error")
+		return
+	}
+
 	redirect(w, r, "/admin/access?flash=saved")
 }

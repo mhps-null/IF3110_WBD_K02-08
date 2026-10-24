@@ -14,7 +14,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		header.Set("X-Frame-Options", "DENY")
 		header.Set("Referrer-Policy", "no-referrer")
 		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		header.Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; style-src 'self'")
+		header.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:")
 		if !strings.HasPrefix(r.URL.Path, "/static/") {
 			header.Set("Cache-Control", "no-store")
 		}

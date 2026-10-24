@@ -46,6 +46,7 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 		return snapshot, errors.New("no active database selected on connection")
 	}
 	activeDB := strings.TrimSpace(activeDBSql.String)
+	snapshot.Schema = activeDB
 
 	tableMap := make(map[string]*contract.Table)
 	tableOrder := make([]string, 0)
@@ -67,7 +68,7 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 		if err := rows.Scan(&schema, &name); err != nil {
 			return snapshot, fmt.Errorf("scan table: %w", err)
 		}
-		key := schema + "." + name
+		key := schema + "\x00" + name
 		t := &contract.Table{
 			Schema:      schema,
 			Name:        name,
@@ -109,7 +110,7 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 			return snapshot, fmt.Errorf("scan column: %w", err)
 		}
 
-		key := schema + "." + table
+		key := schema + "\x00" + table
 		t, ok := tableMap[key]
 		if !ok {
 			continue
@@ -180,7 +181,7 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 			continue
 		}
 
-		ckey := schema + "." + table + "." + name
+		ckey := schema + "\x00" + table + "\x00" + name
 		rawC := &rawConstraint{
 			schema: schema,
 			table:  table,
@@ -229,7 +230,7 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 			return snapshot, fmt.Errorf("scan key column usage: %w", err)
 		}
 
-		ckey := schema + "." + table + "." + cName
+		ckey := schema + "\x00" + table + "\x00" + cName
 		var refS, refT, refC string
 		if refSchema.Valid {
 			refS = refSchema.String
@@ -252,6 +253,24 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 		return snapshot, fmt.Errorf("iterate key column usage: %w", err)
 	}
 
+	type referentialActions struct{ onDelete, onUpdate string }
+	actions := make(map[string]referentialActions)
+	ruleRows, err := db.QueryContext(ctx, `SELECT constraint_schema, table_name, constraint_name, delete_rule, update_rule
+		FROM information_schema.referential_constraints WHERE constraint_schema = ?`, activeDB)
+	if err != nil {
+		return snapshot, fmt.Errorf("query foreign key rules: %w", err)
+	}
+	defer ruleRows.Close()
+	for ruleRows.Next() {
+		var schema, table, name, onDelete, onUpdate string
+		if err := ruleRows.Scan(&schema, &table, &name, &onDelete, &onUpdate); err != nil {
+			return snapshot, fmt.Errorf("scan foreign key rules: %w", err)
+		}
+		actions[schema+"\x00"+table+"\x00"+name] = referentialActions{onDelete, onUpdate}
+	}
+	if err := ruleRows.Err(); err != nil {
+		return snapshot, fmt.Errorf("iterate foreign key rules: %w", err)
+	}
 	checkClauseMap := make(map[string]string)
 	var checkTableExists int
 	checkTableProbe := `SELECT COUNT(1)
@@ -293,9 +312,9 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 				if err := checkRows.Scan(&schema, &table, &cName, &clause); err != nil {
 					return snapshot, fmt.Errorf("scan check constraint: %w", err)
 				}
-				checkClauseMap[schema+"."+table+"."+cName] = clause
-				if _, exists := checkClauseMap[schema+"."+cName]; !exists {
-					checkClauseMap[schema+"."+cName] = clause
+				checkClauseMap[schema+"\x00"+table+"\x00"+cName] = clause
+				if _, exists := checkClauseMap[schema+"\x00"+cName]; !exists {
+					checkClauseMap[schema+"\x00"+cName] = clause
 				}
 			}
 			if err := checkRows.Err(); err != nil {
@@ -320,7 +339,7 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 				if err := checkRows.Scan(&schema, &cName, &clause); err != nil {
 					return snapshot, fmt.Errorf("scan check constraint: %w", err)
 				}
-				checkClauseMap[schema+"."+cName] = clause
+				checkClauseMap[schema+"\x00"+cName] = clause
 			}
 			if err := checkRows.Err(); err != nil {
 				return snapshot, fmt.Errorf("iterate check constraints: %w", err)
@@ -330,7 +349,7 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 
 	for _, ckey := range constraintOrder {
 		rawC := constraintMap[ckey]
-		tKey := rawC.schema + "." + rawC.table
+		tKey := rawC.schema + "\x00" + rawC.table
 		t, ok := tableMap[tKey]
 		if !ok {
 			continue
@@ -344,17 +363,19 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 		}
 
 		if rawC.cType == "CHECK" {
-			tableKey := rawC.schema + "." + rawC.table + "." + rawC.name
+			tableKey := rawC.schema + "\x00" + rawC.table + "\x00" + rawC.name
 			if def, ok := checkClauseMap[tableKey]; ok {
 				c.Definition = def
 			} else {
-				c.Definition = checkClauseMap[rawC.schema+"."+rawC.name]
+				c.Definition = checkClauseMap[rawC.schema+"\x00"+rawC.name]
 			}
 		} else {
 			usages := keyUsageMap[ckey]
 			for _, u := range usages {
 				c.Columns = append(c.Columns, u.column)
 				if rawC.cType == "FOREIGN KEY" {
+					c.RefSchema, c.RefTableName = u.refSchema, u.refTable
+					c.OnDelete, c.OnUpdate = actions[ckey].onDelete, actions[ckey].onUpdate
 					if u.refSchema != "" && u.refTable != "" {
 						c.RefTable = u.refSchema + "." + u.refTable
 					} else if u.refTable != "" {
@@ -386,9 +407,10 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 		name   string
 	}
 	type rawIndex struct {
-		unique  bool
-		method  string
-		columns []string
+		unique         bool
+		method         string
+		columns        []string
+		keyDefinitions []string
 	}
 	indexMap := make(map[indexKey]*rawIndex)
 	indexOrder := make([]indexKey, 0)
@@ -477,13 +499,18 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 			indexOrder = append(indexOrder, k)
 		}
 		idx.columns = append(idx.columns, keyPart)
+		definition := QuoteIdentifier(keyPart)
+		if !colNameNull.Valid && exprNull.Valid {
+			definition = "(" + exprNull.String + ")"
+		}
+		idx.keyDefinitions = append(idx.keyDefinitions, definition)
 	}
 	if err := statsRows.Err(); err != nil {
 		return snapshot, fmt.Errorf("iterate statistics: %w", err)
 	}
 
 	for _, k := range indexOrder {
-		tKey := k.schema + "." + k.table
+		tKey := k.schema + "\x00" + k.table
 		t, ok := tableMap[tKey]
 		if !ok {
 			continue
@@ -491,10 +518,11 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 
 		rawIdx := indexMap[k]
 		t.Indexes = append(t.Indexes, contract.Index{
-			Name:    k.name,
-			Unique:  rawIdx.unique,
-			Columns: rawIdx.columns,
-			Method:  rawIdx.method,
+			Name:           k.name,
+			Unique:         rawIdx.unique,
+			Columns:        rawIdx.columns,
+			Method:         rawIdx.method,
+			KeyDefinitions: rawIdx.keyDefinitions,
 		})
 	}
 

@@ -26,6 +26,7 @@ const (
 type Change struct {
 	Type        ChangeType
 	TableName   string
+	TableSchema string
 	ColumnName  string
 	OldColumn   *contract.Column
 	NewColumn   *contract.Column
@@ -38,43 +39,47 @@ type Change struct {
 // Diff compares two snapshots and returns the operations needed to change a into b.
 // The result is deterministic so generated migration SQL is stable between runs.
 func Diff(a, b contract.SchemaSnapshot) []Change {
+	b = targetInSourceNamespace(a, b)
 	var changes []Change
-	tablesA := make(map[string]contract.Table, len(a.Tables))
-	tablesB := make(map[string]contract.Table, len(b.Tables))
+	tablesA := make(map[tableIdentity]contract.Table, len(a.Tables))
+	tablesB := make(map[tableIdentity]contract.Table, len(b.Tables))
 	for _, table := range a.Tables {
-		tablesA[table.Name] = table
+		tablesA[tableIdentity{table.Schema, table.Name}] = table
 	}
 	for _, table := range b.Tables {
-		tablesB[table.Name] = table
+		tablesB[tableIdentity{table.Schema, table.Name}] = table
 	}
 
-	for _, name := range sortedKeys(tablesA) {
+	for _, name := range sortedTableKeys(tablesA) {
 		tA := tablesA[name]
 		tB, exists := tablesB[name]
 		if !exists {
-			changes = append(changes, Change{Type: DropTable, TableName: name, Destructive: true})
+			changes = append(changes, Change{Type: DropTable, TableSchema: name.schema, TableName: name.name, Destructive: true})
 			continue
 		}
-		changes = append(changes, diffColumns(tA, tB)...)
-		changes = append(changes, diffConstraints(tA, tB)...)
-		changes = append(changes, diffIndexes(tA, tB)...)
+		tableChanges := append(diffColumns(tA, tB), diffConstraints(tA, tB)...)
+		tableChanges = append(tableChanges, diffIndexes(tA, tB)...)
+		for i := range tableChanges {
+			tableChanges[i].TableSchema = name.schema
+		}
+		changes = append(changes, tableChanges...)
 	}
 
-	for _, name := range sortedKeys(tablesB) {
+	for _, name := range sortedTableKeys(tablesB) {
 		if _, exists := tablesA[name]; exists {
 			continue
 		}
 		tableCopy := tablesB[name]
-		changes = append(changes, Change{Type: CreateTable, TableName: name, TableDef: &tableCopy})
+		changes = append(changes, Change{Type: CreateTable, TableSchema: name.schema, TableName: name.name, TableDef: &tableCopy})
 		// Constraints and indexes are separate operations so foreign keys can be
 		// created only after every target table exists.
 		for _, constraint := range sortedConstraints(tableCopy.Constraints) {
 			constraintCopy := constraint
-			changes = append(changes, Change{Type: AddConstraint, TableName: name, Constraint: &constraintCopy})
+			changes = append(changes, Change{Type: AddConstraint, TableSchema: name.schema, TableName: name.name, Constraint: &constraintCopy})
 		}
 		for _, index := range sortedIndexes(indexesWithoutConstraintBacking(tableCopy)) {
 			indexCopy := index
-			changes = append(changes, Change{Type: AddIndex, TableName: name, Index: &indexCopy})
+			changes = append(changes, Change{Type: AddIndex, TableSchema: name.schema, TableName: name.name, Index: &indexCopy})
 		}
 	}
 	return changes
@@ -183,11 +188,14 @@ func diffIndexes(tA, tB contract.Table) []Change {
 
 func sameConstraint(a, b contract.Constraint) bool {
 	return a.Name == b.Name && a.Type == b.Type && sameStrings(a.Columns, b.Columns) &&
-		a.RefTable == b.RefTable && sameStrings(a.RefColumns, b.RefColumns) && a.Definition == b.Definition
+		a.RefTable == b.RefTable && a.RefSchema == b.RefSchema && a.RefTableName == b.RefTableName &&
+		sameStrings(a.RefColumns, b.RefColumns) && a.Definition == b.Definition &&
+		strings.EqualFold(a.OnDelete, b.OnDelete) && strings.EqualFold(a.OnUpdate, b.OnUpdate)
 }
 
 func sameIndex(a, b contract.Index) bool {
 	return a.Name == b.Name && sameStrings(a.Columns, b.Columns) && a.Unique == b.Unique &&
+		a.Predicate == b.Predicate && sameStrings(a.KeyDefinitions, b.KeyDefinitions) &&
 		strings.EqualFold(strings.TrimSpace(a.Method), strings.TrimSpace(b.Method))
 }
 
@@ -264,6 +272,9 @@ func defaultsEqual(a, b *string) bool {
 
 // FormatChange provides a human-readable description of a schema operation.
 func FormatChange(change Change) string {
+	if change.TableSchema != "" {
+		change.TableName = change.TableSchema + "." + change.TableName
+	}
 	switch change.Type {
 	case CreateTable:
 		return fmt.Sprintf("Create table %s", change.TableName)

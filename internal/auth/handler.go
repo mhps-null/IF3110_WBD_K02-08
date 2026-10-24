@@ -78,8 +78,12 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC()
-	rawID, info, err := h.sessions.Create(r.Context(), user.ID, now)
+	rawID, info, err := h.sessions.CreateVerified(r.Context(), user.ID, user.PasswordHash, now)
 	if err != nil {
+		if errors.Is(err, session.ErrCredentialsChanged) {
+			h.loginFailed(w, r, http.StatusUnauthorized)
+			return
+		}
 		h.logger.Error("create session failed")
 		h.renderStatus(w, r, http.StatusInternalServerError, "login", contract.PageData{CSRFToken: csrfToken(r.Context()), Flash: "Terjadi kesalahan. Silakan coba lagi.", FlashKind: "error"})
 		return

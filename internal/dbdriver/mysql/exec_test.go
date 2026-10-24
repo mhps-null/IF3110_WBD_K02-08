@@ -128,6 +128,8 @@ type recordingExecState struct {
 	execErr       error
 	commitErr     error
 	rollbackErr   error
+	query         func(string) (driver.Rows, error)
+	readOnly      bool
 }
 
 type recordingExecConnector struct{ state *recordingExecState }
@@ -155,8 +157,9 @@ func (c *recordingExecConn) Begin() (driver.Tx, error) {
 	c.state.beginCalls++
 	return &recordingExecTx{state: c.state}, nil
 }
-func (c *recordingExecConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
+func (c *recordingExecConn) BeginTx(_ context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	c.state.beginCalls++
+	c.state.readOnly = opts.ReadOnly
 	return &recordingExecTx{state: c.state}, nil
 }
 func (c *recordingExecConn) ExecContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {

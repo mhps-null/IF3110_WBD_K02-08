@@ -216,9 +216,15 @@ func (r *SQLRepository) Update(ctx context.Context, conn *Connection, newPlainPa
 }
 
 func (r *SQLRepository) Delete(ctx context.Context, id int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	var migrationCount int64
 	checkQuery := `SELECT COUNT(1) FROM migrations WHERE db_id = $1`
-	err := r.db.QueryRowContext(ctx, checkQuery, id).Scan(&migrationCount)
+	err = tx.QueryRowContext(ctx, checkQuery, id).Scan(&migrationCount)
 	if err != nil {
 		return fmt.Errorf("check migration history: %w", err)
 	}
@@ -226,8 +232,19 @@ func (r *SQLRepository) Delete(ctx context.Context, id int64) error {
 		return ErrHasMigrationHistory
 	}
 
+	bumpQuery := `UPDATE users SET privilege_version = privilege_version + 1
+		WHERE id IN (
+			SELECT gm.user_id
+			FROM group_db_access gda
+			JOIN group_members gm ON gm.group_id = gda.group_id
+			WHERE gda.db_id = $1
+		)`
+	if _, err := tx.ExecContext(ctx, bumpQuery, id); err != nil {
+		return fmt.Errorf("bump affected user privileges: %w", err)
+	}
+
 	deleteQuery := `DELETE FROM db_connections WHERE id = $1`
-	res, err := r.db.ExecContext(ctx, deleteQuery, id)
+	res, err := tx.ExecContext(ctx, deleteQuery, id)
 	if err != nil {
 		return fmt.Errorf("delete connection: %w", err)
 	}
@@ -240,5 +257,5 @@ func (r *SQLRepository) Delete(ctx context.Context, id int64) error {
 		return contract.ErrNotFound
 	}
 
-	return nil
+	return tx.Commit()
 }

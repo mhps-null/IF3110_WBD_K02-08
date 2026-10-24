@@ -57,6 +57,7 @@ type TargetDB interface {
 
 type SchemaSnapshot struct {
 	Engine Engine
+	Schema string // Active database for MySQL/MariaDB, including an empty database.
 	Tables []Table
 }
 
@@ -76,19 +77,25 @@ type Column struct {
 }
 
 type Constraint struct {
-	Name       string
-	Type       string // PRIMARY KEY, FOREIGN KEY, UNIQUE, or CHECK
-	Columns    []string
-	RefTable   string
-	RefColumns []string
-	Definition string
+	Name         string
+	Type         string // PRIMARY KEY, FOREIGN KEY, UNIQUE, or CHECK
+	Columns      []string
+	RefTable     string
+	RefSchema    string
+	RefTableName string // Raw identifier; RefTable remains the display/legacy qualified name.
+	RefColumns   []string
+	OnDelete     string
+	OnUpdate     string
+	Definition   string
 }
 
 type Index struct {
-	Name    string
-	Columns []string
-	Unique  bool
-	Method  string
+	Name           string
+	Columns        []string
+	Unique         bool
+	Method         string
+	Predicate      string   // PostgreSQL partial-index WHERE expression from the catalog.
+	KeyDefinitions []string // Catalog SQL for index keys; Columns contains names/display values.
 }
 
 type PageRequest struct {
@@ -117,9 +124,14 @@ type ExecResult struct {
 type PlanNode struct {
 	NodeType, Relation, IndexName, JoinType string
 	StartupCost, TotalCost                  float64
+	CostAvailable                           bool
+	StartupCostAvailable                    bool
 	PlanRows                                int64
+	PlanRowsAvailable                       bool
 	ActualTimeMs                            *float64
 	ActualRows                              *int64
+	ActualRowsPerLoop                       *float64
+	ActualLoops                             *int64
 	Children                                []PlanNode
 }
 
@@ -129,6 +141,8 @@ type Plan struct {
 	PlanningMs  *float64
 	ExecutionMs *float64
 	Raw         string
+	Notice      string // Safe explanation of unsupported analysis or estimated fallback.
+	MetricsNote string // Engine-specific meaning of timing, rows, and loops.
 }
 
 type Executor interface {

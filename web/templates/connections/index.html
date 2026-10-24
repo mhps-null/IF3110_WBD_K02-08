@@ -42,7 +42,7 @@
         {{range .Data.Connections}}
         <tr>
           <td class="mono">{{.ID}}</td><td><strong>{{.Name}}</strong></td><td><span class="badge badge-{{.Engine}}">{{.Engine}}</span></td><td class="mono">{{.Host}}:{{.Port}}</td><td>{{.DatabaseName}}</td><td>{{.Username}}</td><td>{{.SSLMode}}</td>
-          <td><div class="action-row"><a href="/admin/connections/{{.ID}}/edit" class="button btn-sm">Ubah</a><form method="post" action="/admin/connections/{{.ID}}/delete" class="inline-form delete-form" data-name="{{.Name}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button type="submit" class="btn-sm danger">Hapus</button></form></div></td>
+          <td><div class="action-row"><a href="/admin/connections/{{.ID}}/edit" class="button btn-sm">Ubah</a><form method="post" action="/admin/connections/{{.ID}}/delete" class="inline-form delete-form" data-name="{{.Name}}" data-confirm="Hapus profil koneksi &quot;{{.Name}}&quot;? Tindakan ini tidak dapat dibatalkan."><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button type="submit" class="btn-sm danger">Hapus</button></form></div></td>
         </tr>
         {{else}}
         <tr><td colspan="8" class="empty-cell">Belum ada koneksi database. Tambahkan profil di atas untuk memulai.</td></tr>

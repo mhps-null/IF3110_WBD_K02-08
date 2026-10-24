@@ -68,41 +68,48 @@ func (s *Store) CreateUser(ctx context.Context, username, passwordHash string) (
 	return id, nil
 }
 
+// DeactivateUser disables the account and revokes all of its sessions atomically.
 func (s *Store) DeactivateUser(ctx context.Context, userID int64) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET is_active = FALSE WHERE id = $1`, userID)
-	if err != nil {
-		return fmt.Errorf("deactivate user: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrUserNotFound
-	}
-	return nil
+	return s.updateUserAndRevokeSessions(ctx, userID, "deactivate user",
+		`UPDATE users SET is_active = FALSE, privilege_version = privilege_version + 1 WHERE id = $1`)
 }
 
 func (s *Store) ActivateUser(ctx context.Context, userID int64) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET is_active = TRUE WHERE id = $1`, userID)
-	if err != nil {
-		return fmt.Errorf("activate user: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrUserNotFound
-	}
-	return nil
+	return s.updateUserAndRevokeSessions(ctx, userID, "activate user",
+		`UPDATE users SET is_active = TRUE, privilege_version = privilege_version + 1 WHERE id = $1`)
 }
 
+// ResetPassword replaces the password hash and revokes every session of the user.
 func (s *Store) ResetPassword(ctx context.Context, userID int64, passwordHash string) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = $1 WHERE id = $2`, passwordHash, userID)
-	if err != nil {
-		return fmt.Errorf("reset password: %w", err)
-	}
+	return s.updateUserAndRevokeSessions(ctx, userID, "reset password",
+		`UPDATE users SET password_hash = $2, privilege_version = privilege_version + 1 WHERE id = $1`, passwordHash)
+}
 
-	n, _ := res.RowsAffected()
-	if n == 0 {
+// updateUserAndRevokeSessions runs the user update and session revocation in one
+func (s *Store) updateUserAndRevokeSessions(ctx context.Context, userID int64, op, userQuery string, extraArgs ...any) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("%s: begin tx: %w", op, err)
+	}
+	defer tx.Rollback()
+
+	args := append([]any{userID}, extraArgs...)
+	res, err := tx.ExecContext(ctx, userQuery, args...)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrUserNotFound
 	}
 
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, userID); err != nil {
+		return fmt.Errorf("%s: revoke sessions: %w", op, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("%s: commit: %w", op, err)
+	}
 	return nil
 }
 
@@ -356,67 +363,86 @@ func (s *Store) ListGroupAccess(ctx context.Context) ([]GroupAccess, error) {
 	return out, rows.Err()
 }
 
-// upsert level akses group->database.
-// kalo level berubah (atau insert baru), semua anggota group dibump privilege_versionnya
-// biar session mereka dirotasi dan cek akses berikutnya pake level terbaru
-func (s *Store) SetGroupAccess(ctx context.Context, groupID, dbID int64, level int) error {
-	if level != 1 && level != 2 {
-		return fmt.Errorf("level tidak valid: %d", level)
-	}
-
+// SetGroupAccessLevels updates all database access levels for a group in a single transaction.
+// entries maps dbID -> level (0: remove, 1: View Only, 2: View + Edit).
+// If any database ID is invalid/not found, or an invalid level is provided, the transaction is rolled back.
+// If any level actually changed, privilege_version is incremented once for all group members.
+func (s *Store) SetGroupAccessLevels(ctx context.Context, groupID int64, entries map[int64]int) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	res, err := tx.ExecContext(ctx, `
-		INSERT INTO group_db_access (group_id, db_id, level) VALUES ($1, $2, $3)
-		ON CONFLICT (group_id, db_id) DO UPDATE SET level = EXCLUDED.level
-		WHERE group_db_access.level != EXCLUDED.level`,
-		groupID, dbID, level)
-
-	if err != nil {
-		return fmt.Errorf("upsert group access: %w", err)
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM groups WHERE id = $1)`, groupID).Scan(&exists); err != nil {
+		return fmt.Errorf("check group: %w", err)
+	}
+	if !exists {
+		return ErrGroupNotFound
 	}
 
-	if n, _ := res.RowsAffected(); n == 0 {
-		return nil // level ga berubah
+	var anyChanged bool
+
+	for dbID, level := range entries {
+		if dbID <= 0 {
+			return fmt.Errorf("id database tidak valid: %d", dbID)
+		}
+		var dbExists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM db_connections WHERE id = $1)`, dbID).Scan(&dbExists); err != nil {
+			return fmt.Errorf("check db: %w", err)
+		}
+		if !dbExists {
+			return fmt.Errorf("database #%d tidak ditemukan", dbID)
+		}
+
+		switch level {
+		case 0:
+			res, err := tx.ExecContext(ctx,
+				`DELETE FROM group_db_access WHERE group_id = $1 AND db_id = $2`,
+				groupID, dbID)
+			if err != nil {
+				return fmt.Errorf("delete group access: %w", err)
+			}
+			if n, _ := res.RowsAffected(); n > 0 {
+				anyChanged = true
+			}
+		case 1, 2:
+			res, err := tx.ExecContext(ctx, `
+				INSERT INTO group_db_access (group_id, db_id, level) VALUES ($1, $2, $3)
+				ON CONFLICT (group_id, db_id) DO UPDATE SET level = EXCLUDED.level
+				WHERE group_db_access.level != EXCLUDED.level`,
+				groupID, dbID, level)
+			if err != nil {
+				return fmt.Errorf("upsert group access: %w", err)
+			}
+			if n, _ := res.RowsAffected(); n > 0 {
+				anyChanged = true
+			}
+		default:
+			return fmt.Errorf("level tidak valid: %d", level)
+		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE users SET privilege_version = privilege_version + 1
-		WHERE id IN (SELECT user_id FROM group_members WHERE group_id = $1)`,
-		groupID); err != nil {
-		return fmt.Errorf("bump members: %w", err)
+	if anyChanged {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE users SET privilege_version = privilege_version + 1
+			WHERE id IN (SELECT user_id FROM group_members WHERE group_id = $1)`,
+			groupID); err != nil {
+			return fmt.Errorf("bump members: %w", err)
+		}
 	}
 
 	return tx.Commit()
 }
 
+func (s *Store) SetGroupAccess(ctx context.Context, groupID, dbID int64, level int) error {
+	if level != 1 && level != 2 {
+		return fmt.Errorf("level tidak valid: %d", level)
+	}
+	return s.SetGroupAccessLevels(ctx, groupID, map[int64]int{dbID: level})
+}
+
 func (s *Store) RemoveGroupAccess(ctx context.Context, groupID, dbID int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	res, err := tx.ExecContext(ctx,
-		`DELETE FROM group_db_access WHERE group_id = $1 AND db_id = $2`,
-		groupID, dbID)
-
-	if err != nil {
-		return fmt.Errorf("delete group access: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return nil // sudah ga ada
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE users SET privilege_version = privilege_version + 1
-		WHERE id IN (SELECT user_id FROM group_members WHERE group_id = $1)`,
-		groupID); err != nil {
-		return fmt.Errorf("bump members: %w", err)
-	}
-	return tx.Commit()
+	return s.SetGroupAccessLevels(ctx, groupID, map[int64]int{dbID: 0})
 }

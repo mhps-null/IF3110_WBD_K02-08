@@ -5,6 +5,7 @@ package admin
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -16,7 +17,9 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/example/if3110-milestone1/internal/access"
+	"github.com/example/if3110-milestone1/internal/connections"
 	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/example/if3110-milestone1/internal/session"
 )
 
 const schemaPath = "../../migrations_meta/001_initial_schema.sql"
@@ -349,7 +352,390 @@ func TestStore_AccessIntegration(t *testing.T) {
 	}
 }
 
-// helper lokal untuk test ini (menghindari import errors tambahan)
 func errorsIs(err, target error) bool {
-	return err != nil && target != nil && err.Error() == target.Error()
+	return errors.Is(err, target)
+}
+
+func insertSession(t *testing.T, db *sql.DB, userID int64, idHash string) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO sessions (user_id, id_hash, absolute_expires_at)
+		VALUES ($1, $2, NOW() + INTERVAL '1 hour')`, userID, idHash); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+}
+
+func activeSessions(t *testing.T, db *sql.DB, userID int64) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE user_id = $1 AND revoked_at IS NULL`, userID).Scan(&n); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	return n
+}
+
+func isActive(t *testing.T, db *sql.DB, userID int64) bool {
+	t.Helper()
+	var active bool
+	if err := db.QueryRow(`SELECT is_active FROM users WHERE id = $1`, userID).Scan(&active); err != nil {
+		t.Fatalf("is_active: %v", err)
+	}
+	return active
+}
+
+func TestStore_AccountStatusSessionLifecycle(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewStore(db)
+	ctx := context.Background()
+
+	t.Run("deactivate revokes sessions and bumps privilege", func(t *testing.T) {
+		uid := insertUser(t, db, "deact", false)
+		insertSession(t, db, uid, "deact-1")
+		insertSession(t, db, uid, "deact-2")
+		before := privilegeVersion(t, db, uid)
+
+		if err := s.DeactivateUser(ctx, uid); err != nil {
+			t.Fatal(err)
+		}
+		if isActive(t, db, uid) || activeSessions(t, db, uid) != 0 || privilegeVersion(t, db, uid) != before+1 {
+			t.Fatal("deactivation must disable the user, revoke every session, and bump privilege_version")
+		}
+	})
+
+	t.Run("reactivation does not resurrect old sessions", func(t *testing.T) {
+		uid := insertUser(t, db, "react", false)
+		insertSession(t, db, uid, "react-old")
+		if err := s.DeactivateUser(ctx, uid); err != nil {
+			t.Fatal(err)
+		}
+		// A session that escaped revocation (e.g. written by a racing login)
+		// must also be invalidated by reactivation.
+		insertSession(t, db, uid, "react-leftover")
+		before := privilegeVersion(t, db, uid)
+
+		if err := s.ActivateUser(ctx, uid); err != nil {
+			t.Fatal(err)
+		}
+		if !isActive(t, db, uid) || activeSessions(t, db, uid) != 0 || privilegeVersion(t, db, uid) != before+1 {
+			t.Fatal("reactivation must enable the user without reviving any earlier session")
+		}
+	})
+
+	t.Run("reset password revokes sessions", func(t *testing.T) {
+		uid := insertUser(t, db, "reset", false)
+		insertSession(t, db, uid, "reset-1")
+		before := privilegeVersion(t, db, uid)
+
+		if err := s.ResetPassword(ctx, uid, "new-hash"); err != nil {
+			t.Fatal(err)
+		}
+		var hash string
+		if err := db.QueryRow(`SELECT password_hash FROM users WHERE id = $1`, uid).Scan(&hash); err != nil {
+			t.Fatal(err)
+		}
+		if hash != "new-hash" || activeSessions(t, db, uid) != 0 || privilegeVersion(t, db, uid) != before+1 {
+			t.Fatal("password reset must store the new hash, revoke sessions, and bump privilege_version")
+		}
+	})
+
+	t.Run("unknown user reports not found", func(t *testing.T) {
+		for name, op := range map[string]func() error{
+			"deactivate": func() error { return s.DeactivateUser(ctx, 999999) },
+			"activate":   func() error { return s.ActivateUser(ctx, 999999) },
+			"reset":      func() error { return s.ResetPassword(ctx, 999999, "x") },
+		} {
+			if err := op(); !errorsIs(err, ErrUserNotFound) {
+				t.Fatalf("%s: want ErrUserNotFound, got %v", name, err)
+			}
+		}
+	})
+
+	t.Run("revocation failure rolls back the account change", func(t *testing.T) {
+		uid := insertUser(t, db, "rollback", false)
+		insertSession(t, db, uid, "rollback-1")
+		before := privilegeVersion(t, db, uid)
+
+		// Force the session UPDATE to fail inside the transaction.
+		for _, stmt := range []string{
+			`CREATE FUNCTION fail_session_update() RETURNS trigger AS $$
+			BEGIN RAISE EXCEPTION 'simulated revocation failure'; END; $$ LANGUAGE plpgsql`,
+			`CREATE TRIGGER fail_session_update BEFORE UPDATE ON sessions
+			FOR EACH ROW EXECUTE FUNCTION fail_session_update()`,
+		} {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("install failure trigger: %v", err)
+			}
+		}
+		t.Cleanup(func() {
+			_, _ = db.Exec(`DROP TRIGGER IF EXISTS fail_session_update ON sessions`)
+			_, _ = db.Exec(`DROP FUNCTION IF EXISTS fail_session_update()`)
+		})
+
+		for name, op := range map[string]func() error{
+			"deactivate": func() error { return s.DeactivateUser(ctx, uid) },
+			"reset":      func() error { return s.ResetPassword(ctx, uid, "should-not-persist") },
+		} {
+			if err := op(); err == nil {
+				t.Fatalf("%s: want error when session revocation fails", name)
+			}
+		}
+		var hash string
+		if err := db.QueryRow(`SELECT password_hash FROM users WHERE id = $1`, uid).Scan(&hash); err != nil {
+			t.Fatal(err)
+		}
+		if !isActive(t, db, uid) || hash != "x" || privilegeVersion(t, db, uid) != before || activeSessions(t, db, uid) != 1 {
+			t.Fatal("a failed revocation must leave the account and sessions unchanged")
+		}
+	})
+}
+
+func TestStore_DeleteConnectionCascadesAndBumpsPrivileges(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewStore(db)
+	checker := access.NewChecker(db)
+	ctx := context.Background()
+
+	connRepo, err := connections.NewSQLRepository(db, make([]byte, 32))
+	if err != nil {
+		t.Fatalf("new sql repository: %v", err)
+	}
+
+	t.Run("successful connection deletion cascades access and bumps affected user privileges", func(t *testing.T) {
+		gidAffected, err := s.CreateGroup(ctx, "grp-affected", "affected group")
+		if err != nil {
+			t.Fatalf("create affected group: %v", err)
+		}
+		gidUnaffected, err := s.CreateGroup(ctx, "grp-unaffected", "unaffected group")
+		if err != nil {
+			t.Fatalf("create unaffected group: %v", err)
+		}
+
+		uidAffected1 := insertUser(t, db, "u-affected-1", false)
+		uidAffected2 := insertUser(t, db, "u-affected-2", false)
+		uidUnaffected := insertUser(t, db, "u-unaffected", false)
+
+		if err := s.AddMember(ctx, gidAffected, uidAffected1); err != nil {
+			t.Fatalf("add member 1: %v", err)
+		}
+		if err := s.AddMember(ctx, gidAffected, uidAffected2); err != nil {
+			t.Fatalf("add member 2: %v", err)
+		}
+		if err := s.AddMember(ctx, gidUnaffected, uidUnaffected); err != nil {
+			t.Fatalf("add member 3: %v", err)
+		}
+
+		targetDBID := insertDB(t, db, "target-db-to-delete")
+		otherDBID := insertDB(t, db, "other-active-db")
+
+		if err := s.SetGroupAccess(ctx, gidAffected, targetDBID, 2); err != nil {
+			t.Fatalf("set group access target: %v", err)
+		}
+		if err := s.SetGroupAccess(ctx, gidUnaffected, otherDBID, 1); err != nil {
+			t.Fatalf("set group access other: %v", err)
+		}
+
+		lvl1, err := checker.EffectiveLevel(ctx, uidAffected1, targetDBID)
+		if err != nil || lvl1 != contract.AccessViewEdit {
+			t.Fatalf("want AccessViewEdit for u-affected-1, got %v (err: %v)", lvl1, err)
+		}
+		lvlOther, err := checker.EffectiveLevel(ctx, uidUnaffected, otherDBID)
+		if err != nil || lvlOther != contract.AccessViewOnly {
+			t.Fatalf("want AccessViewOnly for u-unaffected on other db, got %v (err: %v)", lvlOther, err)
+		}
+
+		vAffected1Before := privilegeVersion(t, db, uidAffected1)
+		vAffected2Before := privilegeVersion(t, db, uidAffected2)
+		vUnaffectedBefore := privilegeVersion(t, db, uidUnaffected)
+
+		if err := connRepo.Delete(ctx, targetDBID); err != nil {
+			t.Fatalf("delete connection: %v", err)
+		}
+
+		var connCount int
+		if err := db.QueryRow(`SELECT COUNT(1) FROM db_connections WHERE id = $1`, targetDBID).Scan(&connCount); err != nil {
+			t.Fatalf("query conn count: %v", err)
+		}
+		if connCount != 0 {
+			t.Fatalf("expected db_connection to be deleted, found %d", connCount)
+		}
+
+		var gdaCount int
+		if err := db.QueryRow(`SELECT COUNT(1) FROM group_db_access WHERE db_id = $1`, targetDBID).Scan(&gdaCount); err != nil {
+			t.Fatalf("query gda count: %v", err)
+		}
+		if gdaCount != 0 {
+			t.Fatalf("expected group_db_access to be cascade deleted, found %d", gdaCount)
+		}
+
+		if v := privilegeVersion(t, db, uidAffected1); v != vAffected1Before+1 {
+			t.Fatalf("u-affected-1 privilege_version: want %d, got %d", vAffected1Before+1, v)
+		}
+		if v := privilegeVersion(t, db, uidAffected2); v != vAffected2Before+1 {
+			t.Fatalf("u-affected-2 privilege_version: want %d, got %d", vAffected2Before+1, v)
+		}
+		if v := privilegeVersion(t, db, uidUnaffected); v != vUnaffectedBefore {
+			t.Fatalf("u-unaffected privilege_version should not change: want %d, got %d", vUnaffectedBefore, v)
+		}
+
+		postLevel, err := checker.EffectiveLevel(ctx, uidAffected1, targetDBID)
+		if err != nil || postLevel != contract.AccessNone {
+			t.Fatalf("post-delete effective level: want AccessNone, got %v (err: %v)", postLevel, err)
+		}
+	})
+
+	t.Run("deletion aborted on migration history rolls back privilege bump and cascade", func(t *testing.T) {
+		gid, err := s.CreateGroup(ctx, "grp-with-migration", "grp")
+		if err != nil {
+			t.Fatalf("create group: %v", err)
+		}
+		uid := insertUser(t, db, "u-with-migration", false)
+		if err := s.AddMember(ctx, gid, uid); err != nil {
+			t.Fatalf("add member: %v", err)
+		}
+		dbID := insertDB(t, db, "db-with-migration")
+		if err := s.SetGroupAccess(ctx, gid, dbID, 2); err != nil {
+			t.Fatalf("set group access: %v", err)
+		}
+
+		_, err = db.Exec(`
+			INSERT INTO migrations (db_id, title, sql_text, status, created_by)
+			VALUES ($1, 'mig 1', 'SELECT 1;', 'success', $2)`, dbID, uid)
+		if err != nil {
+			t.Fatalf("insert migration: %v", err)
+		}
+
+		vBefore := privilegeVersion(t, db, uid)
+
+		err = connRepo.Delete(ctx, dbID)
+		if !errors.Is(err, connections.ErrHasMigrationHistory) {
+			t.Fatalf("want ErrHasMigrationHistory, got %v", err)
+		}
+
+		if v := privilegeVersion(t, db, uid); v != vBefore {
+			t.Fatalf("privilege_version should NOT change on failed delete: want %d, got %d", vBefore, v)
+		}
+
+		var connCount int
+		_ = db.QueryRow(`SELECT COUNT(1) FROM db_connections WHERE id = $1`, dbID).Scan(&connCount)
+		if connCount != 1 {
+			t.Fatalf("db_connection should still exist, got count %d", connCount)
+		}
+
+		var gdaCount int
+		_ = db.QueryRow(`SELECT COUNT(1) FROM group_db_access WHERE db_id = $1`, dbID).Scan(&gdaCount)
+		if gdaCount != 1 {
+			t.Fatalf("group_db_access should still exist, got count %d", gdaCount)
+		}
+	})
+}
+
+func TestStore_SetGroupAccessLevelsAtomic(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewStore(db)
+	ctx := context.Background()
+
+	gid, err := s.CreateGroup(ctx, "grp-matrix", "test group")
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	uid := insertUser(t, db, "u-matrix", false)
+	if err := s.AddMember(ctx, gid, uid); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	db1 := insertDB(t, db, "db-matrix-1")
+	db2 := insertDB(t, db, "db-matrix-2")
+
+	// Set initial baseline
+	if err := s.SetGroupAccessLevels(ctx, gid, map[int64]int{db1: 1, db2: 1}); err != nil {
+		t.Fatalf("initial set: %v", err)
+	}
+	vBefore := privilegeVersion(t, db, uid)
+
+	for _, invalidDBLevel := range []int{0, 1, 2} {
+		t.Run(fmt.Sprintf("non-existent database level %d rolls back all changes", invalidDBLevel), func(t *testing.T) {
+			nonExistentDB := int64(999999)
+			err := s.SetGroupAccessLevels(ctx, gid, map[int64]int{
+				db1:           2,
+				nonExistentDB: invalidDBLevel,
+			})
+			if err == nil {
+				t.Fatal("expected error when setting access for non-existent database")
+			}
+
+			var lvl int
+			if err := db.QueryRow(`SELECT level FROM group_db_access WHERE group_id = $1 AND db_id = $2`, gid, db1).Scan(&lvl); err != nil {
+				t.Fatalf("query level: %v", err)
+			}
+			if lvl != 1 {
+				t.Fatalf("db1 level should remain 1 on rollback, got %d", lvl)
+			}
+
+			if v := privilegeVersion(t, db, uid); v != vBefore {
+				t.Fatalf("privilege_version should not change on rollback: want %d, got %d", vBefore, v)
+			}
+		})
+	}
+
+	t.Run("batch update succeeds and bumps privilege_version exactly once", func(t *testing.T) {
+		err := s.SetGroupAccessLevels(ctx, gid, map[int64]int{
+			db1: 2,
+			db2: 0,
+		})
+		if err != nil {
+			t.Fatalf("batch update failed: %v", err)
+		}
+
+		var lvl1 int
+		if err := db.QueryRow(`SELECT level FROM group_db_access WHERE group_id = $1 AND db_id = $2`, gid, db1).Scan(&lvl1); err != nil {
+			t.Fatalf("query db1: %v", err)
+		}
+		if lvl1 != 2 {
+			t.Fatalf("want db1 level 2, got %d", lvl1)
+		}
+
+		var count2 int
+		if err := db.QueryRow(`SELECT COUNT(1) FROM group_db_access WHERE group_id = $1 AND db_id = $2`, gid, db2).Scan(&count2); err != nil {
+			t.Fatalf("query db2 count: %v", err)
+		}
+		if count2 != 0 {
+			t.Fatalf("want db2 removed, got count %d", count2)
+		}
+
+		if v := privilegeVersion(t, db, uid); v != vBefore+1 {
+			t.Fatalf("privilege_version want %d, got %d", vBefore+1, v)
+		}
+	})
+}
+
+func TestStore_ResetPasswordAndVerifiedSessionOrdering(t *testing.T) {
+	db := setupTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	users := NewStore(db)
+	sessions := session.NewSQLStore(db, session.DefaultConfig())
+	uid := insertUser(t, db, "login-reset-order", false)
+	now := time.Now().UTC()
+
+	// The login verified the original hash "x", but reset finished first.
+	if err := users.ResetPassword(ctx, uid, "new-hash"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := sessions.CreateVerified(ctx, uid, "x", now); !errors.Is(err, session.ErrCredentialsChanged) {
+		t.Fatalf("login using the pre-reset hash must be rejected: %v", err)
+	}
+	if activeSessions(t, db, uid) != 0 {
+		t.Fatal("stale login created an active session")
+	}
+
+	// In the opposite order, reset must revoke the session created first.
+	token, _, err := sessions.CreateVerified(ctx, uid, "new-hash", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := users.ResetPassword(ctx, uid, "latest-hash"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.Load(ctx, token, now); !errors.Is(err, session.ErrInvalid) {
+		t.Fatalf("session created before reset must be revoked: %v", err)
+	}
 }

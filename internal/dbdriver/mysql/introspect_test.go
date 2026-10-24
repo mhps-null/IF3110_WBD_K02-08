@@ -127,6 +127,8 @@ func snapshotQuery(maria bool) queryFunc {
 				[]driver.Value{"app", "users", "email_unique", "email", int64(1), nil, nil, nil},
 				[]driver.Value{"app", "orders", "PRIMARY", "id", int64(1), nil, nil, nil},
 				[]driver.Value{"app", "orders", "user_fk", "id", int64(1), "app", "users", "id"}), nil
+		case strings.Contains(q, "FROM information_schema.referential_constraints"):
+			return rows(5, []driver.Value{"app", "orders", "user_fk", "SET NULL", "CASCADE"}), nil
 		case strings.Contains(q, "FROM information_schema.check_constraints"):
 			if maria {
 				return rows(4, []driver.Value{"app", "users", userCheck, "id > 0"}, []driver.Value{"app", "orders", orderCheck, "id >= 0"}), nil
@@ -171,6 +173,9 @@ func TestSnapshot(t *testing.T) {
 					}
 					if c.Type == "FOREIGN KEY" && (c.RefTable != "app.users" || len(c.RefColumns) != 1 || c.RefColumns[0] != "id") {
 						t.Fatalf("foreign key: %+v", c)
+					}
+					if c.Type == "FOREIGN KEY" && (c.RefSchema != "app" || c.RefTableName != "users" || c.OnDelete != "SET NULL" || c.OnUpdate != "CASCADE") {
+						t.Fatalf("foreign key rules lost: %+v", c)
 					}
 				}
 				if !found {

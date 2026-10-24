@@ -1,0 +1,12 @@
+{"test": "12: user login before deactivation", "status": "PASS", "http": 200, "url": "http://localhost:8081/"}
+{"test": "12: existing session rejected after deactivation", "status": "PASS", "http": 200, "url": "http://localhost:8081/login"}
+{"test": "12: inactive user cannot login", "status": "PASS", "http": 401, "url": "http://localhost:8081/login"}
+{"test": "12: reactivation does not restore old session", "status": "PASS", "http": 200, "url": "http://localhost:8081/login"}
+{"test": "12: fresh login after reactivation works", "status": "PASS", "http": 200, "url": "http://localhost:8081/"}
+{"test": "12: reset rejects existing session", "status": "PASS", "http": 200, "url": "http://localhost:8081/login"}
+{"test": "12: old password is rejected", "status": "PASS", "http": 401, "url": "http://localhost:8081/login"}
+{"test": "12: new password works", "status": "PASS", "http": 200, "url": "http://localhost:8081/"}
+{"test": "13: viewer accessible before deletion", "status": "PASS", "http": 200, "url": "http://localhost:8081/databases/9/schema"}
+{"test": "13: fresh login after access changes", "status": "PASS", "http": 200, "url": "http://localhost:8081/"}
+{"test": "13: deleted profile denies website access", "status": "PASS", "http": 403, "url": "http://localhost:8081/databases/9/schema"}
+{"test": "13: protected profile retains website access", "status": "PASS", "http": 200, "url": "http://localhost:8081/databases/10/schema"}
