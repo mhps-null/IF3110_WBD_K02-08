@@ -51,7 +51,7 @@ func TestServiceExecutionSuccess(t *testing.T) {
 		t.Fatalf("failed to create draft: %v", err)
 	}
 
-	executed, res, err := svc.ExecuteMigration(ctx, draft.ID, 1)
+	executed, res, err := svc.ExecuteMigration(ctx, draft.DBID, draft.ID, 1)
 	if err != nil {
 		t.Fatalf("unexpected error executing migration: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestServiceExecutionSuccess(t *testing.T) {
 		t.Errorf("expected 1 row affected, got %d", res.RowsAffected)
 	}
 
-	_, _, err = svc.ExecuteMigration(ctx, draft.ID, 1)
+	_, _, err = svc.ExecuteMigration(ctx, draft.DBID, draft.ID, 1)
 	if err == nil {
 		t.Errorf("expected error executing already executed migration")
 	}
@@ -92,7 +92,7 @@ func TestServiceExecutionFailure(t *testing.T) {
 
 	draft, _ := svc.CreateDraft(ctx, 10, "Broken SQL", "INVALID SQL;", 1)
 
-	executed, _, err := svc.ExecuteMigration(ctx, draft.ID, 1)
+	executed, _, err := svc.ExecuteMigration(ctx, draft.DBID, draft.ID, 1)
 	if err == nil {
 		t.Fatalf("expected execution error")
 	}
@@ -135,7 +135,7 @@ func TestServiceExplainMigration(t *testing.T) {
 
 	draft, _ := svc.CreateDraft(ctx, 10, "Scan products", "SELECT * FROM products;", 1)
 
-	plan, err := svc.ExplainMigration(ctx, draft.ID, false)
+	plan, err := svc.ExplainMigration(ctx, draft.DBID, draft.ID, false)
 	if err != nil {
 		t.Fatalf("unexpected error running explain: %v", err)
 	}

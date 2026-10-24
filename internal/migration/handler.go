@@ -195,7 +195,7 @@ func (h *Handler) MigrationDetail(w http.ResponseWriter, r *http.Request) {
 	csrf, _ := contract.CSRFTokenFrom(r.Context())
 	flash := r.URL.Query().Get("flash")
 
-	m, err := h.service.GetMigration(r.Context(), mid)
+	m, err := h.service.GetMigration(r.Context(), dbID, mid)
 	if err != nil {
 		if errors.Is(err, contract.ErrNotFound) {
 			http.Error(w, "Migration tidak ditemukan", http.StatusNotFound)
@@ -241,9 +241,13 @@ func (h *Handler) UpdateMigration(w http.ResponseWriter, r *http.Request) {
 	sqlText := strings.TrimSpace(r.FormValue("sql_text"))
 	principal, _ := contract.PrincipalFrom(r.Context())
 
-	_, err = h.service.UpdateDraft(r.Context(), mid, title, sqlText, principal.UserID)
+	_, err = h.service.UpdateDraft(r.Context(), dbID, mid, title, sqlText, principal.UserID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		if errors.Is(err, contract.ErrNotFound) {
+			http.Error(w, "Migration tidak ditemukan", http.StatusNotFound)
+		} else {
+			http.Error(w, "Draft migration tidak dapat diperbarui", http.StatusBadRequest)
+		}
 		return
 	}
 
@@ -264,7 +268,11 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 
 	principal, _ := contract.PrincipalFrom(r.Context())
 
-	updatedM, res, execErr := h.service.ExecuteMigration(r.Context(), mid, principal.UserID)
+	updatedM, res, execErr := h.service.ExecuteMigration(r.Context(), dbID, mid, principal.UserID)
+	if errors.Is(execErr, contract.ErrNotFound) {
+		http.Error(w, "Migration tidak ditemukan", http.StatusNotFound)
+		return
+	}
 	csrf, _ := contract.CSRFTokenFrom(r.Context())
 
 	var flash string
@@ -302,6 +310,16 @@ func (h *Handler) ExplainMigration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	m, err := h.service.GetMigration(r.Context(), dbID, mid)
+	if err != nil {
+		if errors.Is(err, contract.ErrNotFound) {
+			http.Error(w, "Migration tidak ditemukan", http.StatusNotFound)
+		} else {
+			http.Error(w, "Gagal memuat migration", http.StatusInternalServerError)
+		}
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Form tidak valid", http.StatusBadRequest)
 		return
@@ -311,13 +329,15 @@ func (h *Handler) ExplainMigration(w http.ResponseWriter, r *http.Request) {
 	principal, _ := contract.PrincipalFrom(r.Context())
 	csrf, _ := contract.CSRFTokenFrom(r.Context())
 
-	plan, err := h.service.ExplainMigration(r.Context(), mid, analyze)
+	plan, err := h.service.ExplainMigration(r.Context(), dbID, mid, analyze)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Gagal menjalankan EXPLAIN: %v", err), http.StatusBadRequest)
+		if errors.Is(err, contract.ErrNotFound) {
+			http.Error(w, "Migration tidak ditemukan", http.StatusNotFound)
+		} else {
+			http.Error(w, "Gagal menjalankan EXPLAIN", http.StatusBadRequest)
+		}
 		return
 	}
-
-	m, _ := h.service.GetMigration(r.Context(), mid)
 
 	pageData := contract.PageData{
 		Principal: principal,

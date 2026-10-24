@@ -180,7 +180,7 @@ func TestHandlerExecuteMigration(t *testing.T) {
 	}
 
 	// Verify status became success
-	m, _ := svc.GetMigration(ctx, draft.ID)
+	m, _ := svc.GetMigration(ctx, draft.DBID, draft.ID)
 	if m.Status != StatusSuccess {
 		t.Errorf("expected status 'success', got %s", m.Status)
 	}
@@ -255,5 +255,84 @@ func TestHandlerAuthorizationRejection(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("expected 403 Forbidden for View Only trying to execute migration, got %d", rec.Code)
+	}
+}
+
+func TestHandlersRejectMigrationFromDifferentDatabase(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		form   url.Values
+	}{
+		{
+			name:   "detail",
+			method: http.MethodGet,
+			path:   "/databases/1/migrations/1",
+		},
+		{
+			name:   "update",
+			method: http.MethodPost,
+			path:   "/databases/1/migrations/1",
+			form: url.Values{
+				"title":    {"Tampered title"},
+				"sql_text": {"DROP TABLE users;"},
+			},
+		},
+		{
+			name:   "execute",
+			method: http.MethodPost,
+			path:   "/databases/1/migrations/1/execute",
+		},
+		{
+			name:   "explain",
+			method: http.MethodPost,
+			path:   "/databases/1/migrations/1/explain",
+			form:   url.Values{"analyze": {"false"}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h, svc, renderer := setupTestHandler()
+			ctx := context.Background()
+			draft, err := svc.CreateDraft(ctx, 2, "Foreign database draft", "SELECT 1;", 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if draft.ID != 1 {
+				t.Fatalf("test setup migration ID=%d, want 1", draft.ID)
+			}
+
+			mux := http.NewServeMux()
+			h.RegisterRoutes(mux)
+
+			body := strings.NewReader("")
+			if tc.form != nil {
+				body = strings.NewReader(tc.form.Encode())
+			}
+			req := httptest.NewRequest(tc.method, tc.path, body)
+			if tc.form != nil {
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			}
+			req = withUserPrincipal(req, 7, "alice")
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status=%d, want %d; body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
+			}
+
+			stored, err := svc.GetMigration(ctx, draft.DBID, draft.ID)
+			if err != nil {
+				t.Fatalf("reload draft: %v", err)
+			}
+			if stored.DBID != 2 || stored.Title != "Foreign database draft" || stored.Status != StatusDraft {
+				t.Fatalf("foreign migration was changed: DBID=%d title=%q status=%q", stored.DBID, stored.Title, stored.Status)
+			}
+			if renderer.lastTemplate != "" {
+				t.Fatalf("handler rendered %q for a migration from another database", renderer.lastTemplate)
+			}
+		})
 	}
 }

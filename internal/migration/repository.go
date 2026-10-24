@@ -177,7 +177,7 @@ func (r *SQLRepository) RecordExecution(ctx context.Context, id int64, status st
 		return nil, errors.New("migration has already been executed")
 	}
 
-	lockQuery := `SELECT pg_advisory_xact_lock(hashtext('db_migration_' || $1::text))`
+	lockQuery := `SELECT pg_advisory_xact_lock(hashtext('db_migration_' || ($1::bigint)::text))`
 	if _, err := tx.ExecContext(ctx, lockQuery, dbID); err != nil {
 		return nil, fmt.Errorf("failed to acquire advisory lock for database: %w", err)
 	}

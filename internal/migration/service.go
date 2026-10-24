@@ -13,12 +13,12 @@ import (
 
 type Service interface {
 	ListMigrations(ctx context.Context, dbID int64) ([]*Migration, error)
-	GetMigration(ctx context.Context, id int64) (*Migration, error)
+	GetMigration(ctx context.Context, dbID, id int64) (*Migration, error)
 	CreateDraft(ctx context.Context, dbID int64, title, sqlText string, userID int64) (*Migration, error)
-	UpdateDraft(ctx context.Context, id int64, title, sqlText string, userID int64) (*Migration, error)
-	DeleteDraft(ctx context.Context, id int64) error
-	ExecuteMigration(ctx context.Context, id int64, userID int64) (*Migration, contract.ExecResult, error)
-	ExplainMigration(ctx context.Context, id int64, analyze bool) (contract.Plan, error)
+	UpdateDraft(ctx context.Context, dbID, id int64, title, sqlText string, userID int64) (*Migration, error)
+	DeleteDraft(ctx context.Context, dbID, id int64) error
+	ExecuteMigration(ctx context.Context, dbID, id, userID int64) (*Migration, contract.ExecResult, error)
+	ExplainMigration(ctx context.Context, dbID, id int64, analyze bool) (contract.Plan, error)
 }
 
 type migrationService struct {
@@ -52,8 +52,21 @@ func (s *migrationService) ListMigrations(ctx context.Context, dbID int64) ([]*M
 	return s.repo.ListByDB(ctx, dbID)
 }
 
-func (s *migrationService) GetMigration(ctx context.Context, id int64) (*Migration, error) {
-	return s.repo.GetByID(ctx, id)
+func (s *migrationService) getMigrationForDatabase(ctx context.Context, dbID, id int64) (*Migration, error) {
+	m, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if m.DBID != dbID {
+		// Treat a migration from another database as not found, so callers do
+		// not learn that a record exists outside the requested database.
+		return nil, contract.ErrNotFound
+	}
+	return m, nil
+}
+
+func (s *migrationService) GetMigration(ctx context.Context, dbID, id int64) (*Migration, error) {
+	return s.getMigrationForDatabase(ctx, dbID, id)
 }
 
 func (s *migrationService) CreateDraft(ctx context.Context, dbID int64, title, sqlText string, userID int64) (*Migration, error) {
@@ -69,8 +82,8 @@ func (s *migrationService) CreateDraft(ctx context.Context, dbID int64, title, s
 	return m, nil
 }
 
-func (s *migrationService) UpdateDraft(ctx context.Context, id int64, title, sqlText string, userID int64) (*Migration, error) {
-	m, err := s.repo.GetByID(ctx, id)
+func (s *migrationService) UpdateDraft(ctx context.Context, dbID, id int64, title, sqlText string, userID int64) (*Migration, error) {
+	m, err := s.getMigrationForDatabase(ctx, dbID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -86,8 +99,8 @@ func (s *migrationService) UpdateDraft(ctx context.Context, id int64, title, sql
 	return m, nil
 }
 
-func (s *migrationService) DeleteDraft(ctx context.Context, id int64) error {
-	m, err := s.repo.GetByID(ctx, id)
+func (s *migrationService) DeleteDraft(ctx context.Context, dbID, id int64) error {
+	m, err := s.getMigrationForDatabase(ctx, dbID, id)
 	if err != nil {
 		return err
 	}
@@ -97,8 +110,8 @@ func (s *migrationService) DeleteDraft(ctx context.Context, id int64) error {
 	return s.repo.DeleteDraft(ctx, id)
 }
 
-func (s *migrationService) ExecuteMigration(ctx context.Context, id int64, userID int64) (*Migration, contract.ExecResult, error) {
-	m, err := s.repo.GetByID(ctx, id)
+func (s *migrationService) ExecuteMigration(ctx context.Context, dbID, id, userID int64) (*Migration, contract.ExecResult, error) {
+	m, err := s.getMigrationForDatabase(ctx, dbID, id)
 	if err != nil {
 		return nil, contract.ExecResult{}, err
 	}
@@ -136,8 +149,8 @@ func (s *migrationService) ExecuteMigration(ctx context.Context, id int64, userI
 	return updatedM, res, nil
 }
 
-func (s *migrationService) ExplainMigration(ctx context.Context, id int64, analyze bool) (contract.Plan, error) {
-	m, err := s.repo.GetByID(ctx, id)
+func (s *migrationService) ExplainMigration(ctx context.Context, dbID, id int64, analyze bool) (contract.Plan, error) {
+	m, err := s.getMigrationForDatabase(ctx, dbID, id)
 	if err != nil {
 		return contract.Plan{}, err
 	}
