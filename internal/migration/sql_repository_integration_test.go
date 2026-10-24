@@ -114,4 +114,64 @@ func TestSQLRepositoryIntegration(t *testing.T) {
 	if len(list) != 1 {
 		t.Errorf("expected 1 migration in list, got %d", len(list))
 	}
+
+	// Hold an execution reservation open while a second migration in the same
+	// database attempts to reserve execution. The second reservation must wait
+	// for the first one to finalize so versions are allocated in execution order.
+	draft2 := &Migration{DBID: dbID, Title: "Concurrent draft A", SQLText: "SELECT 2;", CreatedBy: userID}
+	draft3 := &Migration{DBID: dbID, Title: "Concurrent draft B", SQLText: "SELECT 3;", CreatedBy: userID}
+	if err := repo.CreateDraft(ctx, draft2); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateDraft(ctx, draft3); err != nil {
+		t.Fatal(err)
+	}
+	firstReservation, err := repo.BeginExecution(ctx, dbID, draft2.ID)
+	if err != nil {
+		t.Fatalf("reserve first concurrent draft: %v", err)
+	}
+	secondStarted := make(chan struct{})
+	secondResult := make(chan struct {
+		reservation ExecutionReservation
+		err         error
+	}, 1)
+	go func() {
+		close(secondStarted)
+		reservation, err := repo.BeginExecution(ctx, dbID, draft3.ID)
+		secondResult <- struct {
+			reservation ExecutionReservation
+			err         error
+		}{reservation: reservation, err: err}
+	}()
+	<-secondStarted
+	select {
+	case result := <-secondResult:
+		if result.reservation != nil {
+			result.reservation.Abort()
+		}
+		firstReservation.Abort()
+		t.Fatal("second execution reservation did not wait for the database lock")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	firstExecuted, err := firstReservation.Complete(ctx, StatusSuccess, userID, nil, ComputeChecksum(draft2.SQLText))
+	if err != nil {
+		firstReservation.Abort()
+		t.Fatalf("complete first concurrent migration: %v", err)
+	}
+	second := <-secondResult
+	if second.err != nil {
+		t.Fatalf("reserve second concurrent draft: %v", second.err)
+	}
+	secondExecuted, err := second.reservation.Complete(ctx, StatusSuccess, userID, nil, ComputeChecksum(draft3.SQLText))
+	if err != nil {
+		second.reservation.Abort()
+		t.Fatalf("complete second concurrent migration: %v", err)
+	}
+	if firstExecuted.Version == nil || *firstExecuted.Version != 2 {
+		t.Fatalf("first reserved execution version=%v, want 2", firstExecuted.Version)
+	}
+	if secondExecuted.Version == nil || *secondExecuted.Version != 3 {
+		t.Fatalf("second reserved execution version=%v, want 3", secondExecuted.Version)
+	}
 }

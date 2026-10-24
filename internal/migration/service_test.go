@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -145,5 +147,68 @@ func TestServiceExplainMigration(t *testing.T) {
 	}
 	if plan.Root.TotalCost != 35.5 {
 		t.Errorf("expected total cost 35.5, got %f", plan.Root.TotalCost)
+	}
+}
+
+type blockingExecutor struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+	calls   atomic.Int32
+}
+
+func (e *blockingExecutor) Execute(ctx context.Context, db *sql.DB, sqlText string) (contract.ExecResult, error) {
+	e.calls.Add(1)
+	e.once.Do(func() { close(e.started) })
+	<-e.release
+	return contract.ExecResult{RowsAffected: 1}, nil
+}
+
+func (e *blockingExecutor) Explain(ctx context.Context, db *sql.DB, sqlText string, analyze bool) (contract.Plan, error) {
+	return contract.Plan{}, nil
+}
+
+func TestServiceSerializesConcurrentExecutionOfSameDraft(t *testing.T) {
+	repo := NewMemoryRepository()
+	exec := &blockingExecutor{started: make(chan struct{}), release: make(chan struct{})}
+	svc := NewCustomService(repo, &FakeTargetDB{Engine: contract.EnginePostgres}, map[contract.Engine]contract.Executor{
+		contract.EnginePostgres: exec,
+	})
+	ctx := context.Background()
+	draft, err := svc.CreateDraft(ctx, 41, "Concurrent draft", "SELECT 1;", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		migration *Migration
+		err       error
+	}
+	firstDone := make(chan result, 1)
+	go func() {
+		m, _, err := svc.ExecuteMigration(ctx, draft.DBID, draft.ID, 7)
+		firstDone <- result{migration: m, err: err}
+	}()
+	<-exec.started
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, _, err := svc.ExecuteMigration(ctx, draft.DBID, draft.ID, 7)
+		secondDone <- err
+	}()
+
+	close(exec.release)
+	first := <-firstDone
+	if first.err != nil {
+		t.Fatalf("first execution failed: %v", first.err)
+	}
+	if first.migration == nil || first.migration.Status != StatusSuccess || first.migration.Version == nil || *first.migration.Version != 1 {
+		t.Fatalf("first execution result unexpected: %#v", first.migration)
+	}
+	if err := <-secondDone; err == nil {
+		t.Fatal("concurrent second execution should be rejected")
+	}
+	if got := exec.calls.Load(); got != 1 {
+		t.Fatalf("target executor called %d times, want exactly once", got)
 	}
 }

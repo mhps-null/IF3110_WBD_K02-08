@@ -11,6 +11,11 @@ import (
 	"github.com/example/if3110-milestone1/internal/dbdriver/postgres"
 )
 
+// ErrTargetCommittedMetadataUnknown means the target SQL transaction succeeded,
+// but the metadata result could not be confirmed. The caller must not claim the
+// target was rolled back and should instruct the user to inspect the target before retrying.
+var ErrTargetCommittedMetadataUnknown = errors.New("target execution succeeded but migration metadata finalization is uncertain")
+
 type Service interface {
 	ListMigrations(ctx context.Context, dbID int64) ([]*Migration, error)
 	GetMigration(ctx context.Context, dbID, id int64) (*Migration, error)
@@ -111,13 +116,12 @@ func (s *migrationService) DeleteDraft(ctx context.Context, dbID, id int64) erro
 }
 
 func (s *migrationService) ExecuteMigration(ctx context.Context, dbID, id, userID int64) (*Migration, contract.ExecResult, error) {
-	m, err := s.getMigrationForDatabase(ctx, dbID, id)
+	reservation, err := s.repo.BeginExecution(ctx, dbID, id)
 	if err != nil {
 		return nil, contract.ExecResult{}, err
 	}
-	if !m.IsEditable() {
-		return nil, contract.ExecResult{}, errors.New("hanya migration berstatus draft yang dapat dieksekusi")
-	}
+	defer reservation.Abort()
+	m := reservation.Migration()
 
 	conn, engine, err := s.targetDB.Open(ctx, m.DBID)
 	if err != nil {
@@ -130,22 +134,20 @@ func (s *migrationService) ExecuteMigration(ctx context.Context, dbID, id, userI
 	}
 
 	checksum := ComputeChecksum(m.SQLText)
-
 	res, execErr := executor.Execute(ctx, conn, m.SQLText)
 	if execErr != nil {
 		errMsg := execErr.Error()
-		updatedM, recordErr := s.repo.RecordExecution(ctx, id, StatusFailed, userID, &errMsg, checksum)
+		updatedM, recordErr := reservation.Complete(ctx, StatusFailed, userID, &errMsg, checksum)
 		if recordErr != nil {
-			return nil, res, fmt.Errorf("eksekusi gagal: %v; gagal mencatat riwayat metadata: %w", execErr, recordErr)
+			return nil, res, fmt.Errorf("eksekusi migration gagal dan status kegagalan tidak dapat dikonfirmasi: %w", recordErr)
 		}
 		return updatedM, res, execErr
 	}
 
-	updatedM, recordErr := s.repo.RecordExecution(ctx, id, StatusSuccess, userID, nil, checksum)
+	updatedM, recordErr := reservation.Complete(ctx, StatusSuccess, userID, nil, checksum)
 	if recordErr != nil {
-		return nil, res, fmt.Errorf("eksekusi di database target berhasil tetapi gagal mencatat status metadata: %w", recordErr)
+		return nil, res, fmt.Errorf("%w: %v", ErrTargetCommittedMetadataUnknown, recordErr)
 	}
-
 	return updatedM, res, nil
 }
 

@@ -273,11 +273,23 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Migration tidak ditemukan", http.StatusNotFound)
 		return
 	}
+	if updatedM == nil {
+		// Some failures happen before execution is finalized (for example, target
+		// connection errors). Reload the record so the detail template never
+		// receives a nil Migration.
+		updatedM, err = h.service.GetMigration(r.Context(), dbID, mid)
+		if err != nil {
+			http.Error(w, "Gagal memuat detail migration", http.StatusInternalServerError)
+			return
+		}
+	}
 	csrf, _ := contract.CSRFTokenFrom(r.Context())
 
 	var flash string
-	if execErr != nil {
-		flash = fmt.Sprintf("Eksekusi gagal dan telah di-rollback: %v", execErr)
+	if errors.Is(execErr, ErrTargetCommittedMetadataUnknown) {
+		flash = "SQL pada database target mungkin sudah berhasil dijalankan, tetapi riwayat migration gagal dikonfirmasi. Jangan jalankan ulang sebelum memeriksa database target dan riwayat migration."
+	} else if execErr != nil {
+		flash = "Migration tidak berhasil diselesaikan. Periksa status database dan riwayat migration sebelum mencoba lagi."
 	} else {
 		flash = fmt.Sprintf("Migration berhasil dieksekusi (Versi %v) dalam %v. Baris terdampak: %d",
 			*updatedM.Version, res.Duration, res.RowsAffected)

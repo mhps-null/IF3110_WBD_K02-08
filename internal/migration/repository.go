@@ -11,12 +11,19 @@ import (
 	"github.com/example/if3110-milestone1/internal/contract"
 )
 
+type ExecutionReservation interface {
+	Migration() *Migration
+	Complete(ctx context.Context, status string, executedBy int64, errMsg *string, checksum string) (*Migration, error)
+	Abort()
+}
+
 type Repository interface {
 	GetByID(ctx context.Context, id int64) (*Migration, error)
 	ListByDB(ctx context.Context, dbID int64) ([]*Migration, error)
 	CreateDraft(ctx context.Context, m *Migration) error
 	UpdateDraft(ctx context.Context, m *Migration) error
 	DeleteDraft(ctx context.Context, id int64) error
+	BeginExecution(ctx context.Context, dbID, id int64) (ExecutionReservation, error)
 	RecordExecution(ctx context.Context, id int64, status string, executedBy int64, errMsg *string, checksum string) (*Migration, error)
 }
 
@@ -156,53 +163,118 @@ func (r *SQLRepository) DeleteDraft(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (r *SQLRepository) RecordExecution(ctx context.Context, id int64, status string, executedBy int64, errMsg *string, checksum string) (*Migration, error) {
+type sqlExecutionReservation struct {
+	repo      *SQLRepository
+	tx        *sql.Tx
+	migration *Migration
+	done      bool
+}
+
+// BeginExecution acquires a per-database transaction-scoped advisory lock and
+// locks the draft row before the target database is touched. The transaction
+// must remain open until Complete or Abort so concurrent executions serialize.
+func (r *SQLRepository) BeginExecution(ctx context.Context, dbID, id int64) (ExecutionReservation, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin metadata transaction: %w", err)
+		return nil, fmt.Errorf("failed to begin migration execution reservation: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	var dbID int64
-	var currentStatus string
-	checkQuery := `SELECT db_id, status FROM migrations WHERE id = $1 FOR UPDATE`
-	if err := tx.QueryRowContext(ctx, checkQuery, id).Scan(&dbID, &currentStatus); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, contract.ErrNotFound
-		}
-		return nil, fmt.Errorf("failed to check migration: %w", err)
-	}
-
-	if currentStatus != StatusDraft {
-		return nil, errors.New("migration has already been executed")
+	abort := func(err error) (ExecutionReservation, error) {
+		_ = tx.Rollback()
+		return nil, err
 	}
 
 	lockQuery := `SELECT pg_advisory_xact_lock(hashtext('db_migration_' || ($1::bigint)::text))`
 	if _, err := tx.ExecContext(ctx, lockQuery, dbID); err != nil {
-		return nil, fmt.Errorf("failed to acquire advisory lock for database: %w", err)
+		return abort(fmt.Errorf("failed to acquire advisory lock for database: %w", err))
+	}
+
+	var m Migration
+	query := `SELECT id, db_id, version, title, sql_text, status, created_by, created_at
+		FROM migrations WHERE db_id = $1 AND id = $2 FOR UPDATE`
+	err = tx.QueryRowContext(ctx, query, dbID, id).Scan(
+		&m.ID, &m.DBID, &m.Version, &m.Title, &m.SQLText, &m.Status, &m.CreatedBy, &m.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return abort(contract.ErrNotFound)
+	}
+	if err != nil {
+		return abort(fmt.Errorf("failed to load migration for execution: %w", err))
+	}
+	if m.Status != StatusDraft {
+		return abort(errors.New("migration has already been executed or is not a draft"))
+	}
+
+	return &sqlExecutionReservation{repo: r, tx: tx, migration: &m}, nil
+}
+
+func (e *sqlExecutionReservation) Migration() *Migration {
+	cp := *e.migration
+	return &cp
+}
+
+func (e *sqlExecutionReservation) Abort() {
+	if e == nil || e.done {
+		return
+	}
+	e.done = true
+	_ = e.tx.Rollback()
+}
+
+func (e *sqlExecutionReservation) Complete(ctx context.Context, status string, executedBy int64, errMsg *string, checksum string) (*Migration, error) {
+	if e == nil || e.done {
+		return nil, errors.New("migration execution reservation is already closed")
+	}
+	abortWith := func(err error) (*Migration, error) {
+		e.Abort()
+		return nil, err
+	}
+	if status != StatusSuccess && status != StatusFailed {
+		return abortWith(fmt.Errorf("invalid execution result status %q", status))
 	}
 
 	var nextVersion int64
 	versionQuery := `SELECT COALESCE(MAX(version), 0) + 1 FROM migrations WHERE db_id = $1 AND version IS NOT NULL`
-	if err := tx.QueryRowContext(ctx, versionQuery, dbID).Scan(&nextVersion); err != nil {
-		return nil, fmt.Errorf("failed to calculate next migration version: %w", err)
+	if err := e.tx.QueryRowContext(ctx, versionQuery, e.migration.DBID).Scan(&nextVersion); err != nil {
+		return abortWith(fmt.Errorf("failed to calculate next migration version: %w", err))
 	}
 
-	now := time.Now()
-	updateQuery := `
-		UPDATE migrations
-		SET version = $1, status = $2, executed_by = $3, executed_at = $4, error_message = $5, checksum = $6
-		WHERE id = $7
-	`
-	if _, err := tx.ExecContext(ctx, updateQuery, nextVersion, status, executedBy, now, errMsg, checksum, id); err != nil {
-		return nil, fmt.Errorf("failed to record migration execution: %w", err)
+	now := time.Now().UTC()
+	updateQuery := `UPDATE migrations
+		SET version = $1, status = $2, executed_by = $3, executed_at = $4,
+			error_message = $5, checksum = $6
+		WHERE id = $7 AND db_id = $8 AND status = $9`
+	res, err := e.tx.ExecContext(ctx, updateQuery, nextVersion, status, executedBy, now, errMsg, checksum,
+		e.migration.ID, e.migration.DBID, StatusDraft)
+	if err != nil {
+		return abortWith(fmt.Errorf("failed to record migration execution: %w", err))
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return abortWith(fmt.Errorf("failed to verify migration execution update: %w", err))
+	}
+	if rows != 1 {
+		return abortWith(errors.New("migration was no longer an executable draft"))
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := e.tx.Commit(); err != nil {
+		e.done = true
 		return nil, fmt.Errorf("commit metadata transaction: %w", err)
 	}
+	e.done = true
+	return e.repo.GetByID(ctx, e.migration.ID)
+}
 
-	return r.GetByID(ctx, id)
+func (r *SQLRepository) RecordExecution(ctx context.Context, id int64, status string, executedBy int64, errMsg *string, checksum string) (*Migration, error) {
+	m, err := r.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	reservation, err := r.BeginExecution(ctx, m.DBID, id)
+	if err != nil {
+		return nil, err
+	}
+	defer reservation.Abort()
+	return reservation.Complete(ctx, status, executedBy, errMsg, checksum)
 }
 
 type MemoryRepository struct {
@@ -293,34 +365,77 @@ func (m *MemoryRepository) DeleteDraft(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (m *MemoryRepository) RecordExecution(ctx context.Context, id int64, status string, executedBy int64, errMsg *string, checksum string) (*Migration, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+type memoryExecutionReservation struct {
+	repo      *MemoryRepository
+	migration *Migration // actual record; repo.mu remains locked until Complete/Abort
+	done      bool
+}
 
+func (m *MemoryRepository) BeginExecution(_ context.Context, dbID, id int64) (ExecutionReservation, error) {
+	m.mu.Lock()
 	item, exists := m.migrations[id]
-	if !exists {
+	if !exists || item.DBID != dbID {
+		m.mu.Unlock()
 		return nil, contract.ErrNotFound
 	}
 	if item.Status != StatusDraft {
-		return nil, errors.New("migration has already been executed")
+		m.mu.Unlock()
+		return nil, errors.New("migration has already been executed or is not a draft")
+	}
+	return &memoryExecutionReservation{repo: m, migration: item}, nil
+}
+
+func (e *memoryExecutionReservation) Migration() *Migration {
+	cp := *e.migration
+	return &cp
+}
+
+func (e *memoryExecutionReservation) Abort() {
+	if e == nil || e.done {
+		return
+	}
+	e.done = true
+	e.repo.mu.Unlock()
+}
+
+func (e *memoryExecutionReservation) Complete(_ context.Context, status string, executedBy int64, errMsg *string, checksum string) (*Migration, error) {
+	if e == nil || e.done {
+		return nil, errors.New("migration execution reservation is already closed")
+	}
+	if status != StatusSuccess && status != StatusFailed {
+		e.Abort()
+		return nil, fmt.Errorf("invalid execution result status %q", status)
 	}
 
-	var maxVersion int64 = 0
-	for _, other := range m.migrations {
-		if other.DBID == item.DBID && other.Version != nil && *other.Version > maxVersion {
+	var maxVersion int64
+	for _, other := range e.repo.migrations {
+		if other.DBID == e.migration.DBID && other.Version != nil && *other.Version > maxVersion {
 			maxVersion = *other.Version
 		}
 	}
 	nextVersion := maxVersion + 1
-
-	now := time.Now()
-	item.Version = &nextVersion
-	item.Status = status
-	item.ExecutedBy = &executedBy
-	item.ExecutedAt = &now
-	item.ErrorMessage = errMsg
-	item.Checksum = &checksum
-
-	cp := *item
+	now := time.Now().UTC()
+	e.migration.Version = &nextVersion
+	e.migration.Status = status
+	e.migration.ExecutedBy = &executedBy
+	e.migration.ExecutedAt = &now
+	e.migration.ErrorMessage = errMsg
+	e.migration.Checksum = &checksum
+	cp := *e.migration
+	e.done = true
+	e.repo.mu.Unlock()
 	return &cp, nil
+}
+
+func (m *MemoryRepository) RecordExecution(ctx context.Context, id int64, status string, executedBy int64, errMsg *string, checksum string) (*Migration, error) {
+	item, err := m.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	reservation, err := m.BeginExecution(ctx, item.DBID, id)
+	if err != nil {
+		return nil, err
+	}
+	defer reservation.Abort()
+	return reservation.Complete(ctx, status, executedBy, errMsg, checksum)
 }
