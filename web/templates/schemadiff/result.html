@@ -1,0 +1,34 @@
+{{define "content"}}
+<section class="panel">
+  <h1>Hasil Schema Diff</h1>
+  <p class="muted">Membandingkan <strong>{{.Data.SourceDBName}}</strong> dengan <strong>{{.Data.TargetDBName}}</strong>.</p>
+
+  {{if .Data.Changes}}
+    <h2>Daftar Perubahan ({{len .Data.Changes}})</h2>
+    <ul>
+      {{range .Data.Changes}}
+      <li>{{.}}</li>
+      {{end}}
+    </ul>
+
+    <h2>Generated SQL ({{.Data.Engine}})</h2>
+    <form method="post" action="/databases/{{.Data.SourceDBID}}/migrations/new">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      
+      <label for="title">Judul Migration</label>
+      <input id="title" name="title" type="text" required value="Auto-generated schema sync" style="width: 100%; margin-bottom: 15px; padding: 8px;">
+      
+      <label for="sql">SQL (Bisa diedit sebelum disimpan)</label>
+      <textarea id="sql" name="sql" rows="10" required style="width: 100%; font-family: monospace; padding: 10px; margin-bottom: 15px; background-color: #f8fafc; color: #000; border: 1px solid #ccc;">{{.Data.GeneratedSQL}}</textarea>
+      
+      <button type="submit" class="primary">Jadikan Migration (Buka di Editor)</button>
+    </form>
+  {{else}}
+    <p class="alert">Tidak ada perbedaan schema antara kedua database.</p>
+  {{end}}
+  
+  <p style="margin-top: 20px;">
+    <a href="/databases/{{.Data.SourceDBID}}/schema-diff">Kembali</a>
+  </p>
+</section>
+{{end}}

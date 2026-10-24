@@ -1,0 +1,59 @@
+{{define "content"}}
+<section class="panel">
+  <nav class="admin-nav">
+    <a href="/admin/users">Users</a> ·
+    <a href="/admin/groups">Groups</a> ·
+    <a href="/admin/access">Access Matrix</a>
+  </nav>
+  {{if .Flash}}<p class="alert" role="alert">{{.Flash}}</p>{{end}}
+
+  <h1>Group: {{.Data.Group.Name}}</h1>
+  <p class="muted">{{.Data.Group.Description}}</p>
+
+  <h2>Anggota ({{len .Data.Members}})</h2>
+  {{if .Data.Members}}
+  <table class="data-table">
+    <thead><tr><th>Username</th><th>Status</th><th>Aksi</th></tr></thead>
+    <tbody>
+      {{range .Data.Members}}
+      <tr>
+        <td>{{.Username}}</td>
+        <td>{{if .IsActive}}Aktif{{else}}Nonaktif{{end}}</td>
+        <td>
+          <form method="post" action="/admin/groups/{{$.Data.Group.ID}}/members/{{.ID}}/remove" class="inline">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <button type="submit">Hapus dari group</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">Belum ada anggota.</p>
+  {{end}}
+
+  <h2>Tambah Anggota</h2>
+  {{if .Data.Available}}
+  <table class="data-table">
+    <thead><tr><th>Username</th><th>Aksi</th></tr></thead>
+    <tbody>
+      {{range .Data.Available}}
+      <tr>
+        <td>{{.Username}}{{if not .IsActive}} (nonaktif){{end}}</td>
+        <td>
+          <form method="post" action="/admin/groups/{{$.Data.Group.ID}}/members" class="inline">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <input type="hidden" name="user_id" value="{{.ID}}">
+            <button type="submit" class="primary">Tambahkan</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">Semua user sudah menjadi anggota group ini.</p>
+  {{end}}
+</section>
+{{end}}

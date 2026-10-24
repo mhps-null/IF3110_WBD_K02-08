@@ -1,0 +1,35 @@
+{{define "content"}}
+<section class="panel">
+  <h1>Schema Diff (Bonus)</h1>
+  <p class="muted">Membandingkan schema database saat ini dengan database lain, lalu hasilkan migration SQL secara otomatis.</p>
+  {{if .Flash}}<p class="alert" role="alert">{{.Flash}}</p>{{end}}
+
+  <form method="post" action="/databases/{{.Data.SourceDBID}}/schema-diff" class="stack">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    
+        <label>Database Target (Pembanding)</label>
+    
+    <div style="border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; margin-bottom: 20px; background: #f8fafc;">
+      {{$source := .Data.SourceDBID}}
+      {{$hasOption := false}}
+      
+      {{range .Data.Databases}}
+        {{if ne .ID $source}}
+          {{$hasOption = true}}
+          <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; cursor: pointer;">
+            <input type="radio" name="target_id" value="{{.ID}}" required>
+            <span>{{.Name}}</span>
+          </label>
+        {{end}}
+      {{end}}
+
+      {{if not $hasOption}}
+        <p class="muted">Tidak ada database lain untuk dibandingkan.</p>
+      {{end}}
+    </div>
+    
+    <button type="submit" class="primary">Bandingkan Schema</button>
+    
+  </form>
+</section>
+{{end}}

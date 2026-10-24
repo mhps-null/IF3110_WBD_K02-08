@@ -1,0 +1,60 @@
+{{define "content"}}
+<section class="panel">
+  <nav class="admin-nav">
+    <a href="/admin/users">Users</a> ·
+    <a href="/admin/groups">Groups</a> ·
+    <a href="/admin/access">Access Matrix</a>
+  </nav>
+  <h1>Kelola User</h1>
+  <p class="muted">Buat user, nonaktifkan, atau reset password. User nonaktif tidak bisa login dan semua sessionnya dicabut.</p>
+  {{if .Flash}}<p class="alert" role="alert">{{.Flash}}</p>{{end}}
+
+  <h2>Tambah User</h2>
+  <form method="post" action="/admin/users" class="stack">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label for="username">Username</label>
+    <input id="username" name="username" type="text" required maxlength="100" autocomplete="off">
+    <label for="password">Password (min. 8 karakter)</label>
+    <input id="password" name="password" type="password" required minlength="8" autocomplete="new-password">
+    <button type="submit" class="primary">Tambah User</button>
+  </form>
+
+  <h2>Daftar User</h2>
+  <table class="data-table">
+    <thead>
+      <tr><th>Username</th><th>Admin</th><th>Status</th><th>Dibuat</th><th>Aksi</th></tr>
+    </thead>
+    <tbody>
+      {{range .Data.Users}}
+      <tr>
+        <td>{{.Username}}</td>
+        <td>{{if .IsAdmin}}Ya{{else}}Tidak{{end}}</td>
+        <td>{{if .IsActive}}Aktif{{else}}Nonaktif{{end}}</td>
+        <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+        <td>
+          {{if .IsActive}}
+          <form method="post" action="/admin/users/{{.ID}}/deactivate" class="inline">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <button type="submit">Nonaktifkan</button>
+          </form>
+          {{else}}
+          <form method="post" action="/admin/users/{{.ID}}/activate" class="inline">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <button type="submit" class="primary">Aktifkan</button>
+          </form>
+          {{end}}
+          
+          <form method="post" action="/admin/users/{{.ID}}/reset-password" class="inline">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <input name="password" type="password" minlength="8" required placeholder="Password baru">
+            <button type="submit">Reset</button>
+          </form>
+        </td>
+      </tr>
+      {{else}}
+      <tr><td colspan="5" class="muted">Belum ada user.</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
