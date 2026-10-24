@@ -3,27 +3,59 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f4f6fa">
+  <meta name="description" content="Database Management Platform untuk menjelajahi database, mengatur akses, dan meninjau migration.">
   <title>Database Management Platform</title>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/app.js" defer></script>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Lewati ke konten utama</a>
   <header class="site-header">
-    <a class="brand" href="/">Database Management Platform</a>
-    {{if .Principal.Username}}
-    <form method="post" action="/logout" class="logout-form">
-      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-      <button type="submit">Keluar</button>
-    </form>
-    {{end}}
+    <div class="header-inner">
+      <a class="brand" href="/" aria-label="Database Management Platform — beranda">
+        <span class="brand-mark" aria-hidden="true">DB</span>
+        <span class="brand-copy">
+          <span class="brand-name">Data Console</span>
+          <span class="brand-subtitle">Database Management Platform</span>
+        </span>
+      </a>
+      {{if .Principal.Username}}
+      <nav class="main-nav" aria-label="Navigasi utama">
+        <a href="/databases">Database</a>
+        {{if .Principal.IsPlatformAdmin}}
+          <a href="/admin/connections">Koneksi</a>
+          <a href="/admin/users">Pengguna</a>
+          <a href="/admin/groups">Group</a>
+          <a href="/admin/access">Matriks akses</a>
+        {{end}}
+      </nav>
+      <div class="header-account">
+        <div class="user-meta">
+          <span class="user-name">{{.Principal.Username}}</span>
+          <span class="user-role">{{if .Principal.IsPlatformAdmin}}Platform Admin{{else}}Pengguna platform{{end}}</span>
+        </div>
+        <form method="post" action="/logout" class="logout-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <button type="submit" class="button-quiet">Keluar</button>
+        </form>
+      </div>
+      {{end}}
+    </div>
   </header>
-  <main class="container">
+
+  <main class="container" id="main-content" tabindex="-1">
     {{if .Flash}}
       {{$kind := .FlashKind}}
       {{if not $kind}}{{$kind = "info"}}{{end}}
-      <div class="flash-message {{if eq $kind "success"}}flash-success{{else if eq $kind "error"}}flash-error{{else}}flash-info{{end}}" role="{{if eq $kind "error"}}alert{{else}}status{{end}}">{{.Flash}}</div>
+      <div class="flash-message {{if eq $kind "success"}}flash-success{{else if eq $kind "error"}}flash-error{{else}}flash-info{{end}}" role="{{if eq $kind "error"}}alert{{else}}status{{end}}" aria-live="{{if eq $kind "error"}}assertive{{else}}polite{{end}}">{{.Flash}}</div>
     {{end}}
     {{template "content" .}}
   </main>
+
+  <footer class="site-footer">
+    <span>Data Console</span><span aria-hidden="true"> · </span><span>Kelola database dengan akses yang terkontrol.</span>
+  </footer>
 </body>
 </html>

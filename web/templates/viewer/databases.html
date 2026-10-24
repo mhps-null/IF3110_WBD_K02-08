@@ -1,44 +1,27 @@
 {{define "content"}}
-<div class="header-actions">
-  <div>
-    <div class="breadcrumbs">
-      <a href="/">Home</a>
-      <span>/</span>
-      <span>Databases</span>
-    </div>
-    <h1>Accessible Databases</h1>
-    <p class="muted">Databases assigned to your user account and group memberships.</p>
+<header class="page-header">
+  <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Beranda</a><span aria-hidden="true">/</span><span aria-current="page">Database</span></nav>
+    <p class="eyebrow">Workspace</p><h1>Database yang dapat diakses</h1>
+    <p class="page-description">Database pada daftar ini tersedia untuk akunmu melalui keanggotaan group. Aksi yang dapat dilakukan mengikuti level akses setiap database.</p>
   </div>
-</div>
+</header>
 
 <div class="db-grid">
   {{range .Data.Databases}}
-  <div class="db-card">
+  <article class="db-card">
     <div>
-      <div class="db-card-meta">
-        <span class="mono">DB #{{.DBID}}</span>
-        {{if eq .Level 1}}
-        <span class="badge badge-view">View Only</span>
-        {{else if eq .Level 2}}
-        <span class="badge badge-edit">View & Edit</span>
-        {{else}}
-        <span class="badge">No Access</span>
-        {{end}}
-      </div>
-      <h3 style="margin-top: .5rem; margin-bottom: 0;">
-        <a href="/databases/{{.DBID}}/schema" class="db-card-title">{{.Name}}</a>
-      </h3>
+      <div class="db-card-meta"><span class="mono">Database #{{.DBID}}</span>{{if eq .Level 1}}<span class="badge badge-view">View Only</span>{{else if eq .Level 2}}<span class="badge badge-edit">View + Edit</span>{{else}}<span class="badge badge-neutral">No Access</span>{{end}}</div>
+      <h2 class="mb-1"><a href="/databases/{{.DBID}}/schema" class="db-card-title">{{.Name}}</a></h2>
+      <p class="muted mb-0">Buka struktur tabel dan telusuri data sesuai hak akses.</p>
     </div>
-    <div>
-      <a href="/databases/{{.DBID}}/schema" style="text-decoration: none;">
-        <button type="button" class="primary" style="width: 100%;">Explore Schema →</button>
-      </a>
-    </div>
-  </div>
+    <a href="/databases/{{.DBID}}/schema" class="button primary">Jelajahi schema <span aria-hidden="true">→</span></a>
+  </article>
   {{else}}
-  <div class="panel" style="grid-column: 1 / -1; text-align: center; padding: 3rem; color: #5d6874;">
-    <p>No databases are currently accessible for your user account.</p>
-    <p class="muted" style="font-size: .875rem;">Contact your platform administrator to request database group access.</p>
+  <div class="empty-state empty-state-wide">
+    <span class="empty-state-icon" aria-hidden="true">▦</span><h2>Belum ada database yang tersedia</h2>
+    <p>Akunmu saat ini belum memiliki akses ke database. Hubungi administrator platform untuk meminta akses melalui group.</p>
+    <a href="/" class="button">Kembali ke beranda</a>
   </div>
   {{end}}
 </div>

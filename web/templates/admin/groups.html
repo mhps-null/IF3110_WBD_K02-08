@@ -1,47 +1,47 @@
 {{define "content"}}
-<section class="panel">
-  <h1>Kelola Group</h1>
-  <p class="muted">Group menentukan akses ke database. User memperoleh akses hanya melalui keanggotaan group.</p>
-  <nav class="admin-nav">
-    <a href="/admin/users">Users</a> ·
-    <a href="/admin/groups">Groups</a> ·
-    <a href="/admin/access">Access Matrix</a>
-  </nav>
-  {{if .Flash}}<p class="alert" role="alert">{{.Flash}}</p>{{end}}
+<header class="page-header">
+  <div class="page-header-main"><p class="eyebrow">Administrasi platform</p><h1>Group</h1><p class="page-description">Group menghubungkan pengguna dengan hak akses database. Akses efektif ditentukan oleh level tertinggi dari group yang diikuti.</p></div>
+</header>
+<nav class="admin-nav" aria-label="Navigasi administrasi">
+  <a href="/admin/users">Pengguna</a><a href="/admin/groups" aria-current="page">Group</a><a href="/admin/access">Matriks akses</a>
+</nav>
 
-  <h2>Buat Group Baru</h2>
-  <form method="post" action="/admin/groups" class="stack">
-    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <label for="name">Nama</label>
-    <input id="name" name="name" type="text" required maxlength="100" autocomplete="off">
-    <label for="description">Deskripsi</label>
-    <input id="description" name="description" type="text" maxlength="255">
-    <button type="submit" class="primary">Buat Group</button>
-  </form>
+<div class="content-grid">
+  <section class="panel">
+    <div class="panel-header"><div><h2>Buat group</h2><p>Kelompokkan pengguna berdasarkan kebutuhan akses.</p></div></div>
+    <form method="post" action="/admin/groups" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <div class="form-field"><label for="name">Nama group</label><input id="name" name="name" type="text" required maxlength="100" autocomplete="off" placeholder="Contoh: Data Analysts"></div>
+      <div class="form-field"><label for="description">Deskripsi</label><input id="description" name="description" type="text" maxlength="255" placeholder="Tujuan dan cakupan group"></div>
+      <button type="submit" class="primary">Buat group</button>
+    </form>
+  </section>
 
-  <h2>Daftar Group</h2>
-  {{if .Data.Groups}}
-  <table class="data-table">
-    <thead><tr><th>Nama</th><th>Deskripsi</th><th>Aksi</th></tr></thead>
-    <tbody>
-      {{range .Data.Groups}}
-      <tr>
-        <td><a href="/admin/groups/{{.ID}}">{{.Name}}</a></td>
-        <td>{{.Description}}</td>
-        <td>
-          <a href="/admin/groups/{{.ID}}">Kelola anggota</a>
-          <form method="post" action="/admin/groups/{{.ID}}/delete" class="inline"
-                onsubmit="return confirm('Hapus group {{.Name}}? Semua keanggotaan dan akses group ini ikut terhapus.');">
-            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-            <button type="submit" class="danger">Hapus</button>
-          </form>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
-  {{else}}
-  <p class="muted">Belum ada group.</p>
-  {{end}}
-</section>
+  <section class="panel">
+    <div class="panel-header"><div><h2>Daftar group</h2><p>Pilih group untuk mengelola membership pengguna.</p></div></div>
+    {{if .Data.Groups}}
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>Nama group</th><th>Deskripsi</th><th>Aksi</th></tr></thead>
+        <tbody>
+          {{range .Data.Groups}}
+          <tr>
+            <td><strong><a href="/admin/groups/{{.ID}}">{{.Name}}</a></strong></td>
+            <td>{{if .Description}}{{.Description}}{{else}}<span class="muted">—</span>{{end}}</td>
+            <td><div class="action-row">
+              <a class="button btn-sm" href="/admin/groups/{{.ID}}">Kelola anggota</a>
+              <form method="post" action="/admin/groups/{{.ID}}/delete" class="inline-form" data-confirm="Hapus group {{.Name}}? Semua keanggotaan dan akses group ini ikut terhapus.">
+                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button type="submit" class="btn-sm danger">Hapus</button>
+              </form>
+            </div></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty-state"><span class="empty-state-icon" aria-hidden="true">◇</span><h3>Belum ada group</h3><p>Buat group pertama untuk mulai mengatur membership dan akses database.</p></div>
+    {{end}}
+  </section>
+</div>
 {{end}}

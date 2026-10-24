@@ -1,95 +1,27 @@
 {{define "content"}}
-<div class="header-actions">
-  <div>
-    <div class="breadcrumbs">
-      <a href="/">Home</a>
-      <span>/</span>
-      <a href="/databases">Databases</a>
-      <span>/</span>
-      <a href="/databases/{{.Data.DBID}}/schema">DB #{{.Data.DBID}}</a>
-      <span>/</span>
-      <span>{{.Data.Schema}}.{{.Data.TableName}} Data</span>
-    </div>
-    <div style="display: flex; align-items: center; gap: .75rem;">
-      <h1>Table Data: {{.Data.TableName}}</h1>
-      <span class="badge badge-{{.Data.Engine}}">{{.Data.Engine}}</span>
-    </div>
-    <p class="muted">Viewing live rows from {{.Data.Schema}}.{{.Data.TableName}} (Total: {{.Data.RowPage.Total}} rows)</p>
+<header class="page-header">
+  <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Beranda</a><span aria-hidden="true">/</span><a href="/databases">Database</a><span aria-hidden="true">/</span><a href="/databases/{{.Data.DBID}}/schema">Database #{{.Data.DBID}}</a><span aria-hidden="true">/</span><span aria-current="page">{{.Data.Schema}}.{{.Data.TableName}}</span></nav>
+    <div class="page-title-row"><h1>Data {{.Data.TableName}}</h1><span class="badge badge-{{.Data.Engine}}">{{.Data.Engine}}</span></div>
+    <p class="page-description">Tabel <code>{{.Data.Schema}}.{{.Data.TableName}}</code> berisi {{.Data.RowPage.Total}} baris. Data ditampilkan secara paginasi.</p>
   </div>
-</div>
+  <div class="page-header-actions"><a class="button" href="/databases/{{.Data.DBID}}/schema">Kembali ke schema</a></div>
+</header>
 
-<div class="tabs">
-  <a href="/databases/{{.Data.DBID}}/tables/{{.Data.TableName}}?schema={{.Data.Schema}}" class="tab-link">Structure</a>
-  <a href="/databases/{{.Data.DBID}}/tables/{{.Data.TableName}}/data?schema={{.Data.Schema}}" class="tab-link active">Data</a>
-</div>
+<nav class="tabs" aria-label="Tampilan tabel"><a href="/databases/{{.Data.DBID}}/tables/{{.Data.TableName}}?schema={{.Data.Schema}}" class="tab-link">Struktur</a><a href="/databases/{{.Data.DBID}}/tables/{{.Data.TableName}}/data?schema={{.Data.Schema}}" class="tab-link active" aria-current="page">Data</a></nav>
 
-<div class="panel">
-  <div class="table-wrapper">
-    <table class="data-table">
-      <thead>
-        <tr>
-          {{range .Data.RowPage.Columns}}
-          <th>
-            {{if eq $.Data.OrderBy .}}
-              {{if $.Data.Desc}}
-              <a href="/databases/{{$.Data.DBID}}/tables/{{$.Data.TableName}}/data?schema={{$.Data.Schema}}&page=1&page_size={{$.Data.PageSize}}&order_by={{.}}&desc=false">
-                {{.}} ↓
-              </a>
-              {{else}}
-              <a href="/databases/{{$.Data.DBID}}/tables/{{$.Data.TableName}}/data?schema={{$.Data.Schema}}&page=1&page_size={{$.Data.PageSize}}&order_by={{.}}&desc=true">
-                {{.}} ↑
-              </a>
-              {{end}}
-            {{else}}
-            <a href="/databases/{{$.Data.DBID}}/tables/{{$.Data.TableName}}/data?schema={{$.Data.Schema}}&page=1&page_size={{$.Data.PageSize}}&order_by={{.}}&desc=false">
-              {{.}}
-            </a>
-            {{end}}
-          </th>
-          {{end}}
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Data.RowPage.Rows}}
-        <tr>
-          {{range .}}
-          <td class="mono">
-            {{if eq . nil}}
-            <span class="muted" style="font-style: italic;">NULL</span>
-            {{else}}
-            {{.}}
-            {{end}}
-          </td>
-          {{end}}
-        </tr>
-        {{else}}
-        <tr>
-          <td colspan="{{len .Data.RowPage.Columns}}" style="text-align: center; color: #5d6874; padding: 2.5rem;">
-            No records found in this table.
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-  </div>
-
+<section class="panel">
+  <div class="panel-header"><div><h2>Baris tabel</h2><p>Pilih header kolom untuk mengurutkan hasil.</p></div><span class="badge badge-neutral">{{.Data.RowPage.Total}} baris</span></div>
+  <div class="table-wrapper"><table class="data-table">
+    <thead><tr>{{range .Data.RowPage.Columns}}<th>{{if eq $.Data.OrderBy .}}{{if $.Data.Desc}}<a href="/databases/{{$.Data.DBID}}/tables/{{$.Data.TableName}}/data?schema={{$.Data.Schema}}&page=1&page_size={{$.Data.PageSize}}&order_by={{.}}&desc=false" aria-label="Urutkan {{.}} secara menaik">{{.}} <span aria-hidden="true">↓</span></a>{{else}}<a href="/databases/{{$.Data.DBID}}/tables/{{$.Data.TableName}}/data?schema={{$.Data.Schema}}&page=1&page_size={{$.Data.PageSize}}&order_by={{.}}&desc=true" aria-label="Urutkan {{.}} secara menurun">{{.}} <span aria-hidden="true">↑</span></a>{{end}}{{else}}<a href="/databases/{{$.Data.DBID}}/tables/{{$.Data.TableName}}/data?schema={{$.Data.Schema}}&page=1&page_size={{$.Data.PageSize}}&order_by={{.}}&desc=false">{{.}}</a>{{end}}</th>{{end}}</tr></thead>
+    <tbody>{{range .Data.RowPage.Rows}}<tr>{{range .}}<td class="mono">{{if eq . nil}}<span class="null-value">NULL</span>{{else}}{{.}}{{end}}</td>{{end}}</tr>{{else}}<tr><td colspan="{{len .Data.RowPage.Columns}}" class="empty-cell">Tidak ada record pada halaman ini.</td></tr>{{end}}</tbody>
+  </table></div>
   <div class="pagination-bar">
-    <div>
-      Showing Page <strong>{{.Data.CurrentPage}}</strong> of <strong>{{.Data.TotalPages}}</strong> (Total {{.Data.RowPage.Total}} rows)
-    </div>
+    <div>Halaman <strong>{{.Data.CurrentPage}}</strong> dari <strong>{{.Data.TotalPages}}</strong><span aria-hidden="true"> · </span>{{.Data.RowPage.Total}} baris</div>
     <div class="pagination-controls">
-      {{if gt .Data.CurrentPage 1}}
-      <a href="/databases/{{.Data.DBID}}/tables/{{.Data.TableName}}/data?schema={{.Data.Schema}}&page={{sub .Data.CurrentPage 1}}&page_size={{.Data.PageSize}}&order_by={{.Data.OrderBy}}&desc={{.Data.Desc}}">
-        <button type="button" class="btn-sm">← Previous</button>
-      </a>
-      {{end}}
-
-      {{if lt .Data.CurrentPage .Data.TotalPages}}
-      <a href="/databases/{{.Data.DBID}}/tables/{{.Data.TableName}}/data?schema={{.Data.Schema}}&page={{add .Data.CurrentPage 1}}&page_size={{.Data.PageSize}}&order_by={{.Data.OrderBy}}&desc={{.Data.Desc}}">
-        <button type="button" class="btn-sm">Next →</button>
-      </a>
-      {{end}}
+      {{if gt .Data.CurrentPage 1}}<a class="button btn-sm" href="/databases/{{.Data.DBID}}/tables/{{.Data.TableName}}/data?schema={{.Data.Schema}}&page={{sub .Data.CurrentPage 1}}&page_size={{.Data.PageSize}}&order_by={{.Data.OrderBy}}&desc={{.Data.Desc}}"><span aria-hidden="true">←</span> Sebelumnya</a>{{end}}
+      {{if lt .Data.CurrentPage .Data.TotalPages}}<a class="button btn-sm" href="/databases/{{.Data.DBID}}/tables/{{.Data.TableName}}/data?schema={{.Data.Schema}}&page={{add .Data.CurrentPage 1}}&page_size={{.Data.PageSize}}&order_by={{.Data.OrderBy}}&desc={{.Data.Desc}}">Berikutnya <span aria-hidden="true">→</span></a>{{end}}
     </div>
   </div>
-</div>
+</section>
 {{end}}

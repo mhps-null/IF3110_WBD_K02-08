@@ -1,38 +1,28 @@
 {{define "content"}}
-<div class="header-actions">
-  <div>
-    <div class="breadcrumbs">
-      <a href="/">Home</a>
-      <span>/</span>
-      <a href="/databases">Databases</a>
-      <span>/</span>
-      <span>DB #{{.Data.DBID}} Schema</span>
+<header class="page-header">
+  <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/">Beranda</a><span aria-hidden="true">/</span>
+      <a href="/databases">Database</a><span aria-hidden="true">/</span>
+      <span aria-current="page">Database #{{.Data.DBID}}</span>
+    </nav>
+    <div class="page-title-row"><h1>Schema database</h1><span class="badge badge-{{.Data.Engine}}">{{.Data.Engine}}</span></div>
+    <p class="page-description">Daftar tabel dan metadata schema yang dapat kamu akses pada database ini.</p>
+    <div class="action-row page-actions">
+      <a class="button" href="/databases/{{.Data.DBID}}/schema-diff">Bandingkan schema</a>
+      <a class="button primary" href="/databases/{{.Data.DBID}}/migrations">Riwayat migration</a>
     </div>
-    <div style="display: flex; align-items: center; gap: .75rem;">
-      <h1>Database Schema</h1>
-      <span class="badge badge-{{.Data.Engine}}">{{.Data.Engine}}</span>
-    </div>
-    <p class="muted">Overview of user tables introspected directly from target catalogs.</p>
-    <p>
-      <a class="button" href="/databases/{{.Data.DBID}}/schema-diff">Compare Schema</a>
-      <a class="button" href="/databases/{{.Data.DBID}}/migrations">Migration History</a>
-    </p>
   </div>
-</div>
+</header>
 
-<div class="panel">
+<section class="panel">
+  <div class="panel-header">
+    <div><h2>Tabel</h2><p>Pilih tabel untuk melihat struktur atau menelusuri datanya.</p></div>
+    <span class="badge badge-neutral">{{len .Data.Snapshot.Tables}} tabel</span>
+  </div>
   <div class="table-wrapper">
     <table class="data-table">
-      <thead>
-        <tr>
-          <th>Schema</th>
-          <th>Table Name</th>
-          <th>Columns</th>
-          <th>Constraints</th>
-          <th>Indexes</th>
-          <th style="text-align: right;">Actions</th>
-        </tr>
-      </thead>
+      <thead><tr><th>Schema</th><th>Nama tabel</th><th>Kolom</th><th>Constraint</th><th>Index</th><th>Aksi</th></tr></thead>
       <tbody>
         {{range .Data.Snapshot.Tables}}
         <tr>
@@ -41,22 +31,18 @@
           <td>{{len .Columns}}</td>
           <td>{{len .Constraints}}</td>
           <td>{{len .Indexes}}</td>
-          <td style="text-align: right; display: flex; justify-content: flex-end; gap: .5rem;">
-            <a href="/databases/{{$.Data.DBID}}/tables/{{.Name}}?schema={{.Schema}}" style="text-decoration:none;">
-              <button type="button" class="btn-sm">Structure</button>
-            </a>
-            <a href="/databases/{{$.Data.DBID}}/tables/{{.Name}}/data?schema={{.Schema}}" style="text-decoration:none;">
-              <button type="button" class="btn-sm primary">Browse Data</button>
-            </a>
+          <td class="cell-actions">
+            <div class="action-row">
+              <a href="/databases/{{$.Data.DBID}}/tables/{{.Name}}?schema={{.Schema}}" class="button btn-sm">Struktur</a>
+              <a href="/databases/{{$.Data.DBID}}/tables/{{.Name}}/data?schema={{.Schema}}" class="button btn-sm primary">Lihat data</a>
+            </div>
           </td>
         </tr>
         {{else}}
-        <tr>
-          <td colspan="6" style="text-align: center; color: #5d6874; padding: 2rem;">No user tables found in this database.</td>
-        </tr>
+        <tr><td colspan="6" class="empty-cell">Tidak ada tabel yang ditemukan pada schema ini.</td></tr>
         {{end}}
       </tbody>
     </table>
   </div>
-</div>
+</section>
 {{end}}

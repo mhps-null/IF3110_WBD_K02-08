@@ -1,35 +1,45 @@
 {{define "content"}}
-<section class="panel">
-  <h1>Schema Diff (Bonus)</h1>
-  <p class="muted">Membandingkan schema database saat ini dengan database lain, lalu hasilkan migration SQL secara otomatis.</p>
-  {{if .Flash}}<p class="alert" role="alert">{{.Flash}}</p>{{end}}
+<header class="page-header">
+  <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/">Beranda</a><span aria-hidden="true">/</span>
+      <a href="/databases">Database</a><span aria-hidden="true">/</span>
+      <a href="/databases/{{.Data.SourceDBID}}/schema">Database #{{.Data.SourceDBID}}</a><span aria-hidden="true">/</span>
+      <span aria-current="page">Schema diff</span>
+    </nav>
+    <p class="eyebrow">Tools schema</p>
+    <h1>Bandingkan schema</h1>
+    <p class="page-description">Bandingkan dua kondisi schema dan hasilkan kandidat SQL migration. SQL yang dihasilkan harus ditinjau sebelum disimpan atau dijalankan.</p>
+  </div>
+</header>
 
+<section class="panel narrow">
+  <div class="panel-header">
+    <div><h2>Pilih database pembanding</h2><p>Database sumber: <strong>#{{.Data.SourceDBID}}</strong>.</p></div>
+  </div>
   <form method="post" action="/databases/{{.Data.SourceDBID}}/schema-diff" class="stack">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    
-        <label>Database Target (Pembanding)</label>
-    
-    <div style="border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; margin-bottom: 20px; background: #f8fafc;">
-      {{$source := .Data.SourceDBID}}
-      {{$hasOption := false}}
-      
+    <fieldset class="target-options">
+      <legend class="mb-1">Database target</legend>
+      {{$source := .Data.SourceDBID}}{{$hasOption := false}}
       {{range .Data.Databases}}
         {{if ne .DBID $source}}
           {{$hasOption = true}}
-          <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; cursor: pointer;">
+          <label class="target-option">
             <input type="radio" name="target_id" value="{{.DBID}}" required>
-            <span>{{.Name}}</span>
+            <span class="target-option-copy"><strong>{{.Name}}</strong><small class="muted">Database #{{.DBID}}</small></span>
           </label>
         {{end}}
       {{end}}
-
-      {{if not $hasOption}}
-        <p class="muted">Tidak ada database lain untuk dibandingkan.</p>
-      {{end}}
-    </div>
-    
-    <button type="submit" class="primary">Bandingkan Schema</button>
-    
+      {{if not $hasOption}}<p class="muted mb-0">Tidak ada database lain yang tersedia untuk dibandingkan.</p>{{end}}
+    </fieldset>
+    {{if $hasOption}}
+      <button type="submit" class="primary">Bandingkan schema <span aria-hidden="true">→</span></button>
+    {{else}}
+      <a class="button" href="/databases">Kembali ke daftar database</a>
+    {{end}}
   </form>
 </section>
+
+<section class="notice mt-2"><strong>Catatan:</strong> hasil perbandingan merupakan kandidat perubahan. Tinjau definisi dan dampaknya sebelum menyimpan sebagai draft migration.</section>
 {{end}}

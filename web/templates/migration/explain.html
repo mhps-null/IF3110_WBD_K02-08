@@ -1,119 +1,36 @@
 {{define "content"}}
-<div class="header-actions">
-  <div>
-    <div class="breadcrumbs">
-      <a href="/">Home</a>
-      <span>/</span>
-      <a href="/databases">Databases</a>
-      <span>/</span>
-      <a href="/databases/{{.Data.DBID}}/migrations">DB #{{.Data.DBID}} Migrations</a>
-      <span>/</span>
-      <a href="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}">Migration #{{.Data.Migration.ID}}</a>
-      <span>/</span>
-      <span>Query Execution Plan</span>
-    </div>
-    <div style="display: flex; align-items: center; gap: .75rem;">
-      <h1>Hasil EXPLAIN Execution Plan</h1>
-      {{if .Data.Analyzed}}
-        <span class="badge badge-edit">EXPLAIN ANALYZE</span>
-      {{else}}
-        <span class="badge badge-view">EXPLAIN (Estimated)</span>
+<header class="page-header">
+  <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Beranda</a><span aria-hidden="true">/</span><a href="/databases">Database</a><span aria-hidden="true">/</span><a href="/databases/{{.Data.DBID}}/migrations">Migration</a><span aria-hidden="true">/</span><a href="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}">#{{.Data.Migration.ID}}</a><span aria-hidden="true">/</span><span aria-current="page">Execution plan</span></nav>
+    <p class="eyebrow">Analisis query</p>
+    <div class="explain-heading"><h1>Execution plan</h1>{{if .Data.Analyzed}}<span class="badge badge-warning">EXPLAIN ANALYZE diminta</span>{{else}}<span class="badge badge-view">Estimasi EXPLAIN</span>{{end}}</div>
+    <p class="page-description">Rencana yang dikembalikan database untuk SQL migration <strong>{{.Data.Migration.Title}}</strong>.</p>
+  </div>
+  <div class="page-header-actions"><a class="button" href="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}">Kembali ke detail</a></div>
+</header>
+
+<section class="metric-grid mb-1" aria-label="Ringkasan execution plan">
+  <div class="metric-card"><span class="metric-label">Estimated total cost</span><strong class="metric-value text-brand">{{derefFloat .Data.Plan.Root.TotalCost}}</strong></div>
+  <div class="metric-card"><span class="metric-label">Estimated rows</span><strong class="metric-value">{{.Data.Plan.Root.PlanRows}}</strong><span class="muted">baris</span></div>
+  {{if .Data.Plan.PlanningMs}}<div class="metric-card"><span class="metric-label">Planning time</span><strong class="metric-value">{{derefFloat .Data.Plan.PlanningMs}}</strong><span class="muted">ms</span></div>{{end}}
+  {{if .Data.Plan.ExecutionMs}}<div class="metric-card"><span class="metric-label">Execution time</span><strong class="metric-value text-success">{{derefFloat .Data.Plan.ExecutionMs}}</strong><span class="muted">ms</span></div>{{end}}
+</section>
+
+<section class="panel mb-1">
+  <div class="panel-header"><div><h2>Node execution plan</h2><p>Detail scan, relasi, index, estimasi cost, dan metrik aktual jika tersedia.</p></div></div>
+  <div class="table-wrapper"><table class="data-table">
+    <thead><tr><th>Node / scan / join</th><th>Relasi</th><th>Index</th><th>Startup → total cost</th><th>Estimasi baris</th><th>Baris aktual</th><th>Waktu aktual</th></tr></thead>
+    <tbody>
+      <tr><td><strong class="text-brand">{{.Data.Plan.Root.NodeType}}</strong></td><td>{{if .Data.Plan.Root.Relation}}<code>{{.Data.Plan.Root.Relation}}</code>{{else}}—{{end}}</td><td>{{if .Data.Plan.Root.IndexName}}<code>{{.Data.Plan.Root.IndexName}}</code>{{else}}—{{end}}</td><td class="mono">{{derefFloat .Data.Plan.Root.StartupCost}} → {{derefFloat .Data.Plan.Root.TotalCost}}</td><td>{{.Data.Plan.Root.PlanRows}}</td><td>{{if .Data.Plan.Root.ActualRows}}{{.Data.Plan.Root.ActualRows}}{{else}}—{{end}}</td><td>{{if .Data.Plan.Root.ActualTimeMs}}{{derefFloat .Data.Plan.Root.ActualTimeMs}} ms{{else}}—{{end}}</td></tr>
+      {{range .Data.Plan.Root.Children}}
+      <tr><td><span class="node-child">↳</span> {{.NodeType}}</td><td>{{if .Relation}}<code>{{.Relation}}</code>{{else}}—{{end}}</td><td>{{if .IndexName}}<code>{{.IndexName}}</code>{{else}}—{{end}}</td><td class="mono">{{derefFloat .StartupCost}} → {{derefFloat .TotalCost}}</td><td>{{.PlanRows}}</td><td>{{if .ActualRows}}{{.ActualRows}}{{else}}—{{end}}</td><td>{{if .ActualTimeMs}}{{derefFloat .ActualTimeMs}} ms{{else}}—{{end}}</td></tr>
       {{end}}
-    </div>
-    <p class="muted">Analisis rencana eksekusi database engine sebelum query di-commit ke sistem nyata.</p>
-  </div>
-  <div>
-    <a href="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}" style="text-decoration:none;">
-      <button type="button">Kembali ke Detail Migration</button>
-    </a>
-  </div>
-</div>
+    </tbody>
+  </table></div>
+</section>
 
-{{if .Flash}}
-<div class="alert alert-success">{{.Flash}}</div>
-{{end}}
-
-<!-- Ringkasan Metrik Plan -->
-<div class="panel" style="margin-bottom: 1.5rem;">
-  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
-    <div style="padding: .75rem; background: #f8fafc; border-radius: .5rem; border: 1px solid #edf1f5;">
-      <span class="eyebrow">Estimated Total Cost</span>
-      <div style="font-size: 1.25rem; font-weight: 700; margin-top: .25rem; color: #164e8a;">
-        {{derefFloat .Data.Plan.Root.TotalCost}}
-      </div>
-    </div>
-    <div style="padding: .75rem; background: #f8fafc; border-radius: .5rem; border: 1px solid #edf1f5;">
-      <span class="eyebrow">Estimated Rows</span>
-      <div style="font-size: 1.25rem; font-weight: 700; margin-top: .25rem;">
-        {{.Data.Plan.Root.PlanRows}} rows
-      </div>
-    </div>
-    {{if .Data.Plan.PlanningMs}}
-    <div style="padding: .75rem; background: #f8fafc; border-radius: .5rem; border: 1px solid #edf1f5;">
-      <span class="eyebrow">Planning Time</span>
-      <div style="font-size: 1.25rem; font-weight: 700; margin-top: .25rem;">
-        {{derefFloat .Data.Plan.PlanningMs}} ms
-      </div>
-    </div>
-    {{end}}
-    {{if .Data.Plan.ExecutionMs}}
-    <div style="padding: .75rem; background: #f8fafc; border-radius: .5rem; border: 1px solid #edf1f5;">
-      <span class="eyebrow">Execution Time</span>
-      <div style="font-size: 1.25rem; font-weight: 700; margin-top: .25rem; color: #166534;">
-        {{derefFloat .Data.Plan.ExecutionMs}} ms
-      </div>
-    </div>
-    {{end}}
-  </div>
-</div>
-
-<!-- Tree / Detail Node Plan -->
-<div class="panel" style="margin-bottom: 1.5rem;">
-  <h3>Struktur Node Eksekusi</h3>
-  <div class="table-wrapper">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Node Type (Metode Scan / Join)</th>
-          <th>Tabel / Relasi</th>
-          <th>Indeks yang Digunakan</th>
-          <th>Cost (Startup..Total)</th>
-          <th>Est. Rows</th>
-          <th>Actual Rows</th>
-          <th>Actual Time</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong style="color: #164e8a;">{{.Data.Plan.Root.NodeType}}</strong></td>
-          <td>{{if .Data.Plan.Root.Relation}}<code>{{.Data.Plan.Root.Relation}}</code>{{else}}-{{end}}</td>
-          <td>{{if .Data.Plan.Root.IndexName}}<code>{{.Data.Plan.Root.IndexName}}</code>{{else}}-{{end}}</td>
-          <td class="mono">{{derefFloat .Data.Plan.Root.StartupCost}} .. {{derefFloat .Data.Plan.Root.TotalCost}}</td>
-          <td>{{.Data.Plan.Root.PlanRows}}</td>
-          <td>{{if .Data.Plan.Root.ActualRows}}{{.Data.Plan.Root.ActualRows}}{{else}}-{{end}}</td>
-          <td>{{if .Data.Plan.Root.ActualTimeMs}}{{derefFloat .Data.Plan.Root.ActualTimeMs}} ms{{else}}-{{end}}</td>
-        </tr>
-        {{range .Data.Plan.Root.Children}}
-        <tr>
-          <td style="padding-left: 2rem;">-- {{.NodeType}}</td>
-          <td>{{if .Relation}}<code>{{.Relation}}</code>{{else}}-{{end}}</td>
-          <td>{{if .IndexName}}<code>{{.IndexName}}</code>{{else}}-{{end}}</td>
-          <td class="mono">{{derefFloat .StartupCost}} .. {{derefFloat .TotalCost}}</td>
-          <td>{{.PlanRows}}</td>
-          <td>{{if .ActualRows}}{{.ActualRows}}{{else}}-{{end}}</td>
-          <td>{{if .ActualTimeMs}}{{derefFloat .ActualTimeMs}} ms{{else}}-{{end}}</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<!-- Raw Output JSON -->
-<div class="panel">
-  <h3>Raw Plan Output</h3>
-  <div style="background: #1e293b; color: #f8fafc; padding: 1rem; border-radius: .5rem; overflow-x: auto; font-family: ui-monospace, monospace; font-size: .8125rem; max-height: 350px;">
-    <pre style="margin: 0;">{{.Data.Plan.Raw}}</pre>
-  </div>
-</div>
+<section class="panel">
+  <div class="panel-header"><div><h2>Output mentah</h2><p>Output engine untuk penelusuran detail.</p></div></div>
+  <pre class="code-block raw-output"><code>{{.Data.Plan.Raw}}</code></pre>
+</section>
 {{end}}

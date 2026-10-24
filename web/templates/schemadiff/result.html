@@ -1,34 +1,29 @@
 {{define "content"}}
-<section class="panel">
-  <h1>Hasil Schema Diff</h1>
-  <p class="muted">Membandingkan <strong>{{.Data.SourceDBName}}</strong> dengan <strong>{{.Data.TargetDBName}}</strong>.</p>
+<header class="page-header">
+  <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Beranda</a><span aria-hidden="true">/</span><a href="/databases">Database</a><span aria-hidden="true">/</span><a href="/databases/{{.Data.SourceDBID}}/schema-diff">Schema diff</a><span aria-hidden="true">/</span><span aria-current="page">Hasil</span></nav>
+    <p class="eyebrow">Tools schema</p><h1>Hasil perbandingan</h1>
+    <p class="page-description">Membandingkan <strong>{{.Data.SourceDBName}}</strong> dengan <strong>{{.Data.TargetDBName}}</strong>. Periksa daftar perubahan dan SQL sebelum membuat draft.</p>
+  </div>
+  <div class="page-header-actions"><a class="button" href="/databases/{{.Data.SourceDBID}}/schema-diff">Bandingkan lagi</a></div>
+</header>
 
-  {{if .Data.Changes}}
-    <h2>Daftar Perubahan ({{len .Data.Changes}})</h2>
-    <ul>
-      {{range .Data.Changes}}
-      <li>{{.}}</li>
-      {{end}}
-    </ul>
-
-    <h2>Generated SQL ({{.Data.Engine}})</h2>
-    <form method="post" action="/databases/{{.Data.SourceDBID}}/migrations/new">
-      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-      
-      <label for="title">Judul Migration</label>
-      <input id="title" name="title" type="text" required value="Auto-generated schema sync" style="width: 100%; margin-bottom: 15px; padding: 8px;">
-      
-      <label for="sql">SQL (Bisa diedit sebelum disimpan)</label>
-      <textarea id="sql" name="sql" rows="10" required style="width: 100%; font-family: monospace; padding: 10px; margin-bottom: 15px; background-color: #f8fafc; color: #000; border: 1px solid #ccc;">{{.Data.GeneratedSQL}}</textarea>
-      
-      <button type="submit" class="primary">Jadikan Migration (Buka di Editor)</button>
-    </form>
-  {{else}}
-    <p class="alert">Tidak ada perbedaan schema antara kedua database.</p>
-  {{end}}
-  
-  <p style="margin-top: 20px;">
-    <a href="/databases/{{.Data.SourceDBID}}/schema-diff">Kembali</a>
-  </p>
+{{if .Data.Changes}}
+<section class="panel mb-1">
+  <div class="panel-header"><div><h2>Perubahan schema</h2><p>Perubahan yang terdeteksi oleh pembanding schema.</p></div><span class="badge badge-warning">{{len .Data.Changes}} perubahan</span></div>
+  <ol class="change-list">{{range .Data.Changes}}<li><code>{{.}}</code></li>{{end}}</ol>
 </section>
+
+<section class="panel">
+  <div class="panel-header"><div><h2>Kandidat SQL migration</h2><p>Engine target: <span class="badge badge-{{.Data.Engine}}">{{.Data.Engine}}</span>. SQL tetap dapat diedit sebelum disimpan.</p></div></div>
+  <form method="post" action="/databases/{{.Data.SourceDBID}}/migrations/new" class="stack">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="form-field"><label for="title">Judul draft</label><input id="title" name="title" type="text" required maxlength="200" value="Sinkronisasi schema otomatis"></div>
+    <div class="form-field"><label for="sql">SQL yang dihasilkan</label><textarea class="sql-editor" id="sql" name="sql" rows="18" required spellcheck="false" autocapitalize="off" autocomplete="off">{{.Data.GeneratedSQL}}</textarea><small class="field-hint">Tinjau seluruh statement, identifier, destructive change, dan dependency sebelum menyimpan.</small></div>
+    <div class="form-actions"><button type="submit" class="primary">Buka di editor migration</button><a class="button" href="/databases/{{.Data.SourceDBID}}/schema">Kembali ke schema</a></div>
+  </form>
+</section>
+{{else}}
+<section class="empty-state"><span class="empty-state-icon" aria-hidden="true">✓</span><h2>Schema sudah sesuai</h2><p>Tidak ada perbedaan schema yang terdeteksi antara kedua database.</p><a class="button" href="/databases/{{.Data.SourceDBID}}/schema">Kembali ke schema</a></section>
+{{end}}
 {{end}}

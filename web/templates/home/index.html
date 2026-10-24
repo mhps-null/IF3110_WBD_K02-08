@@ -1,12 +1,49 @@
 {{define "content"}}
-<section class="panel">
-  <p class="eyebrow">Fondasi aplikasi</p>
-  <h1>Halo, {{.Principal.Username}}.</h1>
-  <p>Autentikasi dan session berhasil. Pilih database yang dapat diakses untuk melihat schema, data tabel, dan riwayat migration.</p>
-  <p><a href="/databases">Pilih database</a></p>
-  {{if .Principal.IsPlatformAdmin}}
-    <p class="muted">Akun ini memiliki flag Platform Admin. Hak akses ke database tetap ditentukan melalui group.</p>
-    <p><a href="/admin/connections">Kelola koneksi database</a> · <a href="/admin/users">Kelola pengguna</a> · <a href="/admin/groups">Kelola group</a> · <a href="/admin/access">Kelola akses</a></p>
-  {{end}}
+<section class="welcome-panel">
+  <div class="welcome-copy">
+    <p class="eyebrow">Database workspace</p>
+    <h1>Halo, {{.Principal.Username}}.</h1>
+    <p>Jelajahi database yang dapat kamu akses, periksa struktur tabel, tinjau data, dan kelola migration dari satu tempat.</p>
+    <div class="action-row">
+      <a class="button primary" href="/databases">Pilih database <span aria-hidden="true">→</span></a>
+      {{if .Principal.IsPlatformAdmin}}<a class="button" href="/admin/connections">Kelola koneksi</a>{{end}}
+    </div>
+  </div>
+  <div class="welcome-mark" aria-hidden="true"><span>DB</span><i></i><i></i><i></i></div>
 </section>
+
+<section class="section-block">
+  <div class="section-heading">
+    <div><p class="eyebrow">Mulai bekerja</p><h2>Apa yang ingin kamu lakukan?</h2></div>
+  </div>
+  <div class="feature-grid">
+    <a class="feature-card" href="/databases">
+      <span class="feature-icon" aria-hidden="true">▦</span>
+      <span class="feature-title">Jelajahi database</span>
+      <span class="feature-description">Lihat schema, kolom, constraint, index, dan data tabel sesuai hak aksesmu.</span>
+      <span class="feature-link">Buka database <span aria-hidden="true">→</span></span>
+    </a>
+    {{if .Principal.IsPlatformAdmin}}
+    <a class="feature-card" href="/admin/connections">
+      <span class="feature-icon" aria-hidden="true">⌁</span>
+      <span class="feature-title">Koneksi database</span>
+      <span class="feature-description">Kelola profil koneksi dan uji konektivitas database target.</span>
+      <span class="feature-link">Kelola koneksi <span aria-hidden="true">→</span></span>
+    </a>
+    <a class="feature-card" href="/admin/users">
+      <span class="feature-icon" aria-hidden="true">♙</span>
+      <span class="feature-title">Pengguna dan akses</span>
+      <span class="feature-description">Kelola pengguna, group, membership, dan hak akses per database.</span>
+      <span class="feature-link">Kelola pengguna <span aria-hidden="true">→</span></span>
+    </a>
+    {{end}}
+  </div>
+</section>
+
+{{if .Principal.IsPlatformAdmin}}
+<section class="notice-card" aria-label="Informasi peran administrator">
+  <span class="notice-icon" aria-hidden="true">i</span>
+  <div><strong>Peran Platform Admin</strong><p>Hak Platform Admin mengatur platform, tetapi akses ke tiap database tetap ditentukan oleh konfigurasi group.</p></div>
+</section>
+{{end}}
 {{end}}

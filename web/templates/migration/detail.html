@@ -1,141 +1,67 @@
 {{define "content"}}
-<div class="header-actions">
-  <div>
-    <div class="breadcrumbs">
-      <a href="/">Home</a>
-      <span>/</span>
-      <a href="/databases">Databases</a>
-      <span>/</span>
-      <a href="/databases/{{.Data.DBID}}/migrations">DB #{{.Data.DBID}} Migrations</a>
-      <span>/</span>
-      <span>Detail Migration #{{.Data.Migration.ID}}</span>
-    </div>
-    <div style="display: flex; align-items: center; gap: .75rem;">
-      <h1>{{.Data.Migration.Title}}</h1>
-      {{if eq .Data.Migration.Status "success"}}
-        <span class="badge badge-edit">Success (v{{derefInt .Data.Migration.Version}})</span>
-      {{else if eq .Data.Migration.Status "failed"}}
-        <span class="badge" style="background: #fee2e2; color: #991b1b;">Failed (v{{derefInt .Data.Migration.Version}})</span>
-      {{else}}
-        <span class="badge badge-view">Draft</span>
-      {{end}}
-    </div>
+<header class="page-header">
+  <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Beranda</a><span aria-hidden="true">/</span><a href="/databases">Database</a><span aria-hidden="true">/</span><a href="/databases/{{.Data.DBID}}/schema">Database #{{.Data.DBID}}</a><span aria-hidden="true">/</span><a href="/databases/{{.Data.DBID}}/migrations">Migration</a><span aria-hidden="true">/</span><span aria-current="page">#{{.Data.Migration.ID}}</span></nav>
+    <p class="eyebrow">Detail migration</p>
+    <div class="page-title-row"><h1>{{.Data.Migration.Title}}</h1>{{if eq .Data.Migration.Status "success"}}<span class="badge badge-success">Berhasil · v{{derefInt .Data.Migration.Version}}</span>{{else if eq .Data.Migration.Status "failed"}}<span class="badge badge-failed">Gagal · v{{derefInt .Data.Migration.Version}}</span>{{else}}<span class="badge badge-draft">Draft</span>{{end}}</div>
+    <p class="page-description">Tinjau SQL, status audit, dan tindakan yang tersedia untuk migration ini.</p>
   </div>
-  <div>
-    <a href="/databases/{{.Data.DBID}}/migrations" style="text-decoration:none;">
-      <button type="button">Kembali ke Riwayat</button>
-    </a>
-  </div>
-</div>
-
-{{if .Flash}}
-  {{if .Data.ExecError}}
-    <div class="alert alert-error">{{.Flash}}</div>
-  {{else}}
-    <div class="alert alert-success">{{.Flash}}</div>
-  {{end}}
-{{end}}
+  <div class="page-header-actions"><a class="button" href="/databases/{{.Data.DBID}}/migrations">Kembali ke riwayat</a></div>
+</header>
 
 {{if .Data.Migration.ErrorMessage}}
-<div class="alert alert-error">
-  <strong>Eksekusi migration mengalami kegagalan.</strong>
-  <p>Detail teknis disimpan pada metadata internal dan tidak ditampilkan pada halaman ini.</p>
-</div>
+<div class="notice notice-danger mb-1" role="status"><strong>Eksekusi migration mengalami kegagalan.</strong><p class="mb-0">Detail teknis disimpan pada metadata internal dan tidak ditampilkan pada halaman ini. Periksa kondisi database target dan riwayat sebelum mencoba menjalankan ulang.</p></div>
 {{end}}
 
-<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; align-items: start;">
-  <!-- Kolom Kiri: Form/Tampilan Query SQL -->
-  <div class="panel">
-    {{if .Data.Migration.IsEditable}}
-      <h3>Edit Draft Migration</h3>
-      <form method="post" action="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}">
+<div class="two-column-layout">
+  <div class="side-stack">
+    <section class="panel">
+      {{if .Data.Migration.IsEditable}}
+      <div class="panel-header"><div><h2>Editor draft</h2><p>Perubahan belum dijalankan dan masih dapat diedit.</p></div><span class="badge badge-draft">Editable</span></div>
+      <form method="post" action="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}" class="stack">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        
-        <div>
-          <label for="title">Judul</label>
-          <input type="text" id="title" name="title" value="{{.Data.Migration.Title}}" required>
-        </div>
-
-        <div style="margin-top: 1rem;">
-          <label for="sql_text">Query SQL</label>
-          <textarea id="sql_text" name="sql_text" rows="14" style="width: 100%; font-family: ui-monospace, monospace; padding: .75rem; border: 1px solid #b9c3cd; border-radius: .5rem; font-size: .875rem;" required>{{.Data.Migration.SQLText}}</textarea>
-        </div>
-
-        <div style="display: flex; gap: .75rem; margin-top: 1rem;">
-          <button type="submit">Simpan Perubahan Draft</button>
-        </div>
+        <div class="form-field"><label for="title">Judul</label><input type="text" id="title" name="title" value="{{.Data.Migration.Title}}" required maxlength="200"></div>
+        <div class="form-field"><label for="sql_text">SQL migration</label><textarea class="sql-editor" id="sql_text" name="sql_text" rows="18" spellcheck="false" autocapitalize="off" autocomplete="off" required>{{.Data.Migration.SQLText}}</textarea></div>
+        <div class="form-actions"><button type="submit" class="primary">Simpan perubahan</button></div>
       </form>
-    {{else}}
-      <h3>Query SQL yang Dijalankan</h3>
-      <div style="background: #1e293b; color: #f8fafc; padding: 1.25rem; border-radius: .5rem; overflow-x: auto; font-family: ui-monospace, monospace; font-size: .875rem; line-height: 1.5;">
-        <pre style="margin: 0;">{{.Data.Migration.SQLText}}</pre>
-      </div>
-      <p class="muted" style="font-size: .8125rem; margin-top: .75rem;">
-        <em>Migration yang sudah dieksekusi bersifat immutable untuk menjamin konsistensi riwayat audit skema.</em>
-      </p>
+      {{else}}
+      <div class="panel-header"><div><h2>SQL tersimpan</h2><p>Migration yang sudah diproses tidak dapat diedit agar riwayat tetap konsisten.</p></div><span class="badge badge-neutral">Read-only</span></div>
+      <pre class="code-block"><code>{{.Data.Migration.SQLText}}</code></pre>
+      {{end}}
+    </section>
+
+    {{if .Data.Migration.IsEditable}}
+    <section class="panel panel-accent">
+      <div class="panel-header"><div><h2>Analisis dan eksekusi</h2><p>Tinjau rencana query sebelum memutuskan menjalankan SQL.</p></div></div>
+      <form method="post" action="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}/explain" class="stack">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <label class="checkbox-row" for="analyze"><input type="checkbox" id="analyze" name="analyze" value="true" checked><span>Gunakan EXPLAIN ANALYZE jika didukung. Query dapat benar-benar dieksekusi; dukungan rollback bergantung pada engine dan statement.</span></label>
+        <button type="submit">Analisis execution plan</button>
+      </form>
+      <hr class="divider">
+      <form method="post" action="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}/execute" data-confirm="Jalankan migration ini pada database target? Periksa kembali SQL dan dampaknya. Tindakan ini dapat mengubah database secara permanen.">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button type="submit" class="primary">Jalankan migration</button>
+      </form>
+      <p class="field-hint mt-1">Pastikan SQL sudah ditinjau. Jangan mengandalkan rollback untuk statement yang tidak transaksional.</p>
+    </section>
     {{end}}
   </div>
 
-  <!-- Kolom Kanan: Status & Tindakan Eksekusi -->
-  <div style="display: flex; flex-direction: column; gap: 1.25rem;">
-    <!-- Panel Informasi Metadata -->
-    <div class="panel">
-      <h3 style="margin-top: 0;">Informasi Audit</h3>
-      <dl style="display: grid; grid-template-columns: auto 1fr; gap: .5rem 1rem; font-size: .875rem; margin: 0;">
-        <dt class="muted">Versi:</dt>
-        <dd><strong>{{if .Data.Migration.Version}}v{{derefInt .Data.Migration.Version}}{{else}}Draft (Belum di-assign){{end}}</strong></dd>
-
-        <dt class="muted">Status:</dt>
-        <dd>{{.Data.Migration.Status}}</dd>
-
-        <dt class="muted">Dibuat Oleh:</dt>
-        <dd>{{if .Data.Migration.CreatedByName}}{{.Data.Migration.CreatedByName}}{{else}}User #{{.Data.Migration.CreatedBy}}{{end}}</dd>
-
-        <dt class="muted">Waktu Buat:</dt>
-        <dd>{{formatTime .Data.Migration.CreatedAt}}</dd>
-
-        <dt class="muted">Eksekutor:</dt>
-        <dd>{{if .Data.Migration.ExecutedByName}}{{.Data.Migration.ExecutedByName}}{{else}}-{{end}}</dd>
-
-        <dt class="muted">Waktu Eksekusi:</dt>
-        <dd>{{formatTime .Data.Migration.ExecutedAt}}</dd>
-
-        <dt class="muted">Checksum:</dt>
-        <dd class="mono" style="font-size: .75rem; word-break: break-all;">{{deref .Data.Migration.Checksum}}</dd>
+  <aside class="side-stack" aria-label="Metadata audit migration">
+    <section class="panel">
+      <div class="panel-header"><div><h2>Informasi audit</h2><p>Metadata pencatatan migration.</p></div></div>
+      <dl class="audit-list">
+        <dt>Versi</dt><dd><strong>{{if .Data.Migration.Version}}v{{derefInt .Data.Migration.Version}}{{else}}Belum ditetapkan{{end}}</strong></dd>
+        <dt>Status</dt><dd>{{if eq .Data.Migration.Status "success"}}<span class="badge badge-success">Berhasil</span>{{else if eq .Data.Migration.Status "failed"}}<span class="badge badge-failed">Gagal</span>{{else}}<span class="badge badge-draft">Draft</span>{{end}}</dd>
+        <dt>Dibuat oleh</dt><dd>{{if .Data.Migration.CreatedByName}}{{.Data.Migration.CreatedByName}}{{else}}User #{{.Data.Migration.CreatedBy}}{{end}}</dd>
+        <dt>Waktu dibuat</dt><dd>{{formatTime .Data.Migration.CreatedAt}}</dd>
+        <dt>Dieksekusi oleh</dt><dd>{{if .Data.Migration.ExecutedByName}}{{.Data.Migration.ExecutedByName}}{{else}}—{{end}}</dd>
+        <dt>Waktu eksekusi</dt><dd>{{formatTime .Data.Migration.ExecutedAt}}</dd>
+        <dt>Checksum</dt><dd class="mono checksum">{{deref .Data.Migration.Checksum}}</dd>
       </dl>
-    </div>
-
-    <!-- Panel Eksekusi & EXPLAIN (Hanya jika masih draft) -->
-    {{if .Data.Migration.IsEditable}}
-    <div class="panel" style="border: 2px solid #164e8a;">
-      <h3 style="margin-top: 0; color: #164e8a;">Eksekusi &amp; Analisis</h3>
-      <p style="font-size: .8125rem;" class="muted">
-        Uji query dengan analisis execution plan atau jalankan migrasi secara transaksional ke database target.
-      </p>
-
-      <!-- Form EXPLAIN -->
-      <form method="post" action="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}/explain" style="margin-bottom: 1rem;">
-        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <div style="display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem;">
-          <input type="checkbox" id="analyze" name="analyze" value="true" checked style="width: auto;">
-          <label for="analyze" style="font-size: .8125rem; font-weight: normal; cursor: pointer;">
-            Gunakan <strong>EXPLAIN ANALYZE</strong> (Query dieksekusi di dalam transaksi yang selalu di-rollback otomatis)
-          </label>
-        </div>
-        <button type="submit" style="width: 100%;">Jalankan EXPLAIN Plan</button>
-      </form>
-
-      <hr style="border: 0; border-top: 1px solid #dfe4ea; margin: 1rem 0;">
-
-      <!-- Form Eksekusi -->
-      <form method="post" action="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}/execute" onsubmit="return confirm('Apakah Anda yakin ingin mengeksekusi migration ini ke database target? Perubahan akan di-commit secara permanen.');">
-        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <button type="submit" class="primary" style="width: 100%; background: #166534; border-color: #166534;">
-          Jalankan Migration (Commit)
-        </button>
-      </form>
-    </div>
-    {{end}}
-  </div>
+    </section>
+    <section class="notice notice-warning"><strong>Catatan eksekusi</strong><p class="mb-0">Status migration dan kondisi database target perlu dibaca bersama, terutama jika hasil eksekusi tidak dapat dikonfirmasi.</p></section>
+  </aside>
 </div>
 {{end}}

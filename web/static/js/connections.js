@@ -1,49 +1,45 @@
-document.addEventListener('DOMContentLoaded', () => {
-  const testBtn = document.getElementById('btn-test-conn');
-  if (testBtn) {
-    testBtn.addEventListener('click', () => {
-      const resultSpan = document.getElementById('test-result');
-      if (!resultSpan) return;
+(() => {
+  "use strict";
 
-      resultSpan.textContent = 'Testing connectivity...';
-      resultSpan.style.color = '#164e8a';
+  document.addEventListener("DOMContentLoaded", () => {
+    const testButton = document.getElementById("btn-test-conn");
+    const result = document.getElementById("test-result");
+    const form = document.getElementById("connection-form");
 
-      const form = document.getElementById('connection-form');
-      if (!form) return;
+    if (testButton && result && form) {
+      testButton.addEventListener("click", async () => {
+        result.textContent = "Menguji koneksi…";
+        result.dataset.state = "loading";
+        testButton.disabled = true;
 
-      const formData = new FormData(form);
-
-      fetch('/admin/connections/test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams(formData).toString(),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success) {
-            resultSpan.textContent = '✓ ' + data.message;
-            resultSpan.style.color = '#166534';
-          } else {
-            resultSpan.textContent = '✗ ' + data.message;
-            resultSpan.style.color = '#991b1b';
+        try {
+          const formData = new FormData(form);
+          const response = await fetch("/admin/connections/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams(formData).toString(),
+            credentials: "same-origin",
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.success) {
+            result.textContent = `Gagal: ${payload.message || "Koneksi tidak berhasil diuji."}`;
+            result.dataset.state = "error";
+            return;
           }
-        })
-        .catch(() => {
-          resultSpan.textContent = '✗ Network error during connection test.';
-          resultSpan.style.color = '#991b1b';
-        });
-    });
-  }
+          result.textContent = `Berhasil: ${payload.message || "Koneksi dapat digunakan."}`;
+          result.dataset.state = "success";
+        } catch (_error) {
+          result.textContent = "Gagal menguji koneksi. Periksa jaringan dan coba lagi.";
+          result.dataset.state = "error";
+        } finally {
+          testButton.disabled = false;
+        }
+      });
+    }
 
-  const deleteForms = document.querySelectorAll('.delete-form');
-  deleteForms.forEach((form) => {
-    form.addEventListener('submit', (e) => {
-      const name = form.getAttribute('data-name') || 'this connection';
-      if (!confirm(`Are you sure you want to delete profile "${name}"?`)) {
-        e.preventDefault();
-      }
+    document.querySelectorAll("form.delete-form").forEach((formElement) => {
+      if (!(formElement instanceof HTMLFormElement)) return;
+      formElement.dataset.confirm = `Hapus profil koneksi "${formElement.dataset.name || "ini"}"? Tindakan ini tidak dapat dibatalkan.`;
     });
   });
-});
+})();

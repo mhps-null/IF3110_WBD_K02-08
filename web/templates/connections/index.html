@@ -1,132 +1,55 @@
 {{define "content"}}
-<div class="header-actions">
-  <div>
-    <div class="breadcrumbs">
-      <a href="/">Home</a>
-      <span>/</span>
-      <span>Admin</span>
-      <span>/</span>
-      <span>Connections</span>
-    </div>
-    <h1>Database Connections</h1>
-    <p class="muted">Manage target database connection profiles, encryption, and connectivity.</p>
+<header class="page-header">
+  <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Beranda</a><span aria-hidden="true">/</span><span aria-current="page">Koneksi database</span></nav>
+    <p class="eyebrow">Administrasi platform</p><h1>Koneksi database</h1>
+    <p class="page-description">Kelola profil koneksi ke database target. Password koneksi disimpan terenkripsi; gunakan uji koneksi sebelum menyimpan perubahan.</p>
   </div>
-</div>
+</header>
 
-{{if .Flash}}
-<div class="alert alert-success">{{.Flash}}</div>
-{{end}}
-
-<div class="panel" style="margin-bottom: 2rem;">
-  <h2>Configure New Connection</h2>
-  <form method="post" action="/admin/connections" id="connection-form">
+<section class="panel mb-1">
+  <div class="panel-header"><div><h2>Tambah koneksi</h2><p>Isi endpoint dan kredensial database yang akan dikelola platform.</p></div></div>
+  <form method="post" action="/admin/connections" id="connection-form" class="stack">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    
     <div class="form-row">
-      <div>
-        <label for="name">Profile Name</label>
-        <input type="text" id="name" name="name" placeholder="Production Postgres" required>
-      </div>
-      <div>
-        <label for="engine">Engine</label>
-        <select id="engine" name="engine" required>
-          <option value="postgres" selected>PostgreSQL</option>
-          <option value="mysql">MySQL</option>
-          <option value="mariadb">MariaDB</option>
-        </select>
-      </div>
+      <div class="form-field"><label for="name">Nama profil</label><input type="text" id="name" name="name" placeholder="Contoh: PostgreSQL utama" required maxlength="100" autocomplete="off"></div>
+      <div class="form-field"><label for="engine">Database engine</label><select id="engine" name="engine" required><option value="postgres" selected>PostgreSQL</option><option value="mysql">MySQL</option><option value="mariadb">MariaDB</option></select></div>
     </div>
-
     <div class="form-row">
-      <div>
-        <label for="host">Host</label>
-        <input type="text" id="host" name="host" placeholder="localhost" required>
-      </div>
-      <div>
-        <label for="port">Port</label>
-        <input type="number" id="port" name="port" value="5432" min="1" max="65535" required>
-      </div>
-      <div>
-        <label for="database_name">Database Name</label>
-        <input type="text" id="database_name" name="database_name" placeholder="mydb" required>
-      </div>
+      <div class="form-field"><label for="host">Host</label><input type="text" id="host" name="host" placeholder="localhost atau hostname" required autocomplete="off"></div>
+      <div class="form-field"><label for="port">Port</label><input type="number" id="port" name="port" value="5432" min="1" max="65535" required inputmode="numeric"></div>
+      <div class="form-field"><label for="database_name">Nama database</label><input type="text" id="database_name" name="database_name" placeholder="nama_database" required autocomplete="off"></div>
     </div>
-
     <div class="form-row">
-      <div>
-        <label for="username">Username</label>
-        <input type="text" id="username" name="username" placeholder="dbuser" required>
-      </div>
-      <div>
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" placeholder="••••••••" required>
-      </div>
-      <div>
-        <label for="sslmode">SSL Mode</label>
-        <select id="sslmode" name="sslmode">
-          <option value="disable" selected>Disable</option>
-          <option value="require">Require</option>
-          <option value="verify-ca">Verify CA</option>
-          <option value="verify-full">Verify Full</option>
-        </select>
-      </div>
+      <div class="form-field"><label for="username">Username database</label><input type="text" id="username" name="username" placeholder="db_user" required autocomplete="off"></div>
+      <div class="form-field"><label for="password">Password database</label><input type="password" id="password" name="password" required autocomplete="new-password"><small class="field-hint">Kredensial akan disimpan dalam bentuk terenkripsi.</small></div>
+      <div class="form-field"><label for="sslmode">Mode SSL</label><select id="sslmode" name="sslmode"><option value="disable" selected>Disable</option><option value="require">Require</option><option value="verify-ca">Verify CA</option><option value="verify-full">Verify Full</option></select></div>
     </div>
-
-    <div style="display: flex; gap: .75rem; align-items: center; margin-top: 1rem;">
-      <button type="submit" class="primary">Save Connection</button>
-      <button type="button" id="btn-test-conn">Test Connection</button>
-      <span id="test-result" style="font-size: .875rem; font-weight: 600;"></span>
+    <div class="form-actions">
+      <button type="submit" class="primary">Simpan koneksi</button>
+      <button type="button" id="btn-test-conn">Uji koneksi</button>
+      <span id="test-result" class="status-text" role="status" aria-live="polite"></span>
     </div>
   </form>
-</div>
+</section>
 
-<div class="panel">
-  <h2>Existing Connections</h2>
+<section class="panel">
+  <div class="panel-header"><div><h2>Koneksi tersimpan</h2><p>Informasi endpoint ditampilkan tanpa password.</p></div><span class="badge badge-neutral">{{len .Data.Connections}} profil</span></div>
   <div class="table-wrapper">
     <table class="data-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Name</th>
-          <th>Engine</th>
-          <th>Endpoint</th>
-          <th>Database</th>
-          <th>Username</th>
-          <th>SSL Mode</th>
-          <th style="text-align: right;">Actions</th>
-        </tr>
-      </thead>
+      <thead><tr><th>ID</th><th>Nama profil</th><th>Engine</th><th>Endpoint</th><th>Database</th><th>Username</th><th>SSL</th><th>Aksi</th></tr></thead>
       <tbody>
         {{range .Data.Connections}}
         <tr>
-          <td class="mono">{{.ID}}</td>
-          <td><strong>{{.Name}}</strong></td>
-          <td>
-            <span class="badge badge-{{.Engine}}">{{.Engine}}</span>
-          </td>
-          <td class="mono">{{.Host}}:{{.Port}}</td>
-          <td>{{.DatabaseName}}</td>
-          <td>{{.Username}}</td>
-          <td>{{.SSLMode}}</td>
-          <td style="text-align: right; display: flex; justify-content: flex-end; gap: .5rem;">
-            <a href="/admin/connections/{{.ID}}/edit" class="btn-sm" style="text-decoration: none;">
-              <button type="button" class="btn-sm">Edit</button>
-            </a>
-            <form method="post" action="/admin/connections/{{.ID}}/delete" class="delete-form" data-name="{{.Name}}" style="display:inline; margin:0;">
-              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-              <button type="submit" class="btn-sm btn-danger">Delete</button>
-            </form>
-          </td>
+          <td class="mono">{{.ID}}</td><td><strong>{{.Name}}</strong></td><td><span class="badge badge-{{.Engine}}">{{.Engine}}</span></td><td class="mono">{{.Host}}:{{.Port}}</td><td>{{.DatabaseName}}</td><td>{{.Username}}</td><td>{{.SSLMode}}</td>
+          <td><div class="action-row"><a href="/admin/connections/{{.ID}}/edit" class="button btn-sm">Ubah</a><form method="post" action="/admin/connections/{{.ID}}/delete" class="inline-form delete-form" data-name="{{.Name}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button type="submit" class="btn-sm danger">Hapus</button></form></div></td>
         </tr>
         {{else}}
-        <tr>
-          <td colspan="8" style="text-align: center; color: #5d6874; padding: 2rem;">No database connections configured yet.</td>
-        </tr>
+        <tr><td colspan="8" class="empty-cell">Belum ada koneksi database. Tambahkan profil di atas untuk memulai.</td></tr>
         {{end}}
       </tbody>
     </table>
   </div>
-</div>
-
+</section>
 <script src="/static/js/connections.js" defer></script>
 {{end}}

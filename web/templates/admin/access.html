@@ -1,52 +1,33 @@
 {{define "content"}}
-<section class="panel">
-  <h1>Matriks Akses</h1>
-  <p class="muted">Atur level akses setiap group per database. Perubahan berlaku langsung pada request berikutnya.</p>
-  <nav class="admin-nav">
-    <a href="/admin/users">Users</a> ·
-    <a href="/admin/groups">Groups</a> ·
-    <a href="/admin/access">Access Matrix</a>
-  </nav>
-  {{if .Flash}}<p class="alert" role="alert">{{.Flash}}</p>{{end}}
+<header class="page-header">
+  <div class="page-header-main"><p class="eyebrow">Administrasi platform</p><h1>Matriks akses</h1><p class="page-description">Atur hak akses setiap group terhadap database. Perubahan diverifikasi di server dan berlaku pada permintaan berikutnya.</p></div>
+</header>
+<nav class="admin-nav" aria-label="Navigasi administrasi"><a href="/admin/users">Pengguna</a><a href="/admin/groups">Group</a><a href="/admin/access" aria-current="page">Matriks akses</a></nav>
 
-  {{if .Data.Rows}}
-  <div class="matrix">
-    {{range .Data.Rows}}
-    <form method="post" action="/admin/access" class="matrix-row">
-      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-      <input type="hidden" name="group_id" value="{{.Group.ID}}">
-      <div class="matrix-group"><strong>{{.Group.Name}}</strong></div>
-      <div class="matrix-cells" style="margin-top: 10px;">
-        {{range .Cells}}
-        <div class="matrix-cell" style="border: 1px solid #e2e8f0; padding: 15px; margin-bottom: 10px; border-radius: 6px; background: #f8fafc;">
-          <strong style="display: block; margin-bottom: 10px;">{{.DBName}}</strong>
-          
-          <div style="display: flex; gap: 20px; align-items: center;">
-            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-              <input type="radio" name="level_{{.DBID}}" value="" {{if eq .Level 0}}checked{{end}}> 
-              <span>None</span>
-            </label>
-            
-            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-              <input type="radio" name="level_{{.DBID}}" value="1" {{if eq .Level 1}}checked{{end}}> 
-              <span>View Only</span>
-            </label>
-            
-            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-              <input type="radio" name="level_{{.DBID}}" value="2" {{if eq .Level 2}}checked{{end}}> 
-              <span>View + Edit</span>
-            </label>
-          </div>
-          
+{{if .Data.Rows}}
+<div class="notice mb-1">Level akses menentukan tindakan yang dapat dilakukan anggota group: <strong>None</strong>, <strong>View Only</strong>, atau <strong>View + Edit</strong>. Jika pengguna berada di beberapa group, gunakan level efektif yang ditetapkan sistem.</div>
+<div class="matrix">
+  {{range .Data.Rows}}
+  <form method="post" action="/admin/access" class="matrix-row">
+    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><input type="hidden" name="group_id" value="{{.Group.ID}}">
+    <div class="matrix-group"><span class="eyebrow">Group</span><strong>{{.Group.Name}}</strong></div>
+    <div class="matrix-cells">
+      {{range .Cells}}
+      <div class="matrix-cell"><fieldset>
+        <legend>{{.DBName}}</legend>
+        <div class="choice-set">
+          <label class="choice-label"><input type="radio" name="level_{{.DBID}}" value="" {{if eq .Level 0}}checked{{end}}><span>None</span></label>
+          <label class="choice-label"><input type="radio" name="level_{{.DBID}}" value="1" {{if eq .Level 1}}checked{{end}}><span>View Only</span></label>
+          <label class="choice-label"><input type="radio" name="level_{{.DBID}}" value="2" {{if eq .Level 2}}checked{{end}}><span>View + Edit</span></label>
         </div>
-        {{end}}
-      </div>
-      <button type="submit" class="primary">Simpan</button>
-    </form>
-    {{end}}
-  </div>
-  {{else}}
-  <p class="muted">Belum ada group atau database yang dapat diatur.</p>
+      </fieldset></div>
+      {{end}}
+    </div>
+    <div class="matrix-actions"><button type="submit" class="primary">Simpan akses {{.Group.Name}}</button></div>
+  </form>
   {{end}}
-</section>
+</div>
+{{else}}
+<div class="empty-state"><span class="empty-state-icon" aria-hidden="true">▦</span><h2>Matriks akses belum tersedia</h2><p>Buat setidaknya satu group dan satu koneksi database agar hubungan akses bisa diatur.</p><div class="action-row"><a class="button" href="/admin/groups">Kelola group</a><a class="button primary" href="/admin/connections">Kelola koneksi</a></div></div>
+{{end}}
 {{end}}

@@ -1,59 +1,43 @@
 {{define "content"}}
+<header class="page-header">
+  <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Beranda</a><span aria-hidden="true">/</span><a href="/admin/groups">Group</a><span aria-hidden="true">/</span><span aria-current="page">{{.Data.Group.Name}}</span></nav>
+    <p class="eyebrow">Administrasi platform</p><h1>{{.Data.Group.Name}}</h1>
+    <p class="page-description">{{if .Data.Group.Description}}{{.Data.Group.Description}}{{else}}Belum ada deskripsi untuk group ini.{{end}}</p>
+  </div>
+  <div class="page-header-actions"><a class="button" href="/admin/groups">Kembali ke group</a></div>
+</header>
+<nav class="admin-nav" aria-label="Navigasi administrasi"><a href="/admin/users">Pengguna</a><a href="/admin/groups" aria-current="page">Group</a><a href="/admin/access">Matriks akses</a></nav>
+
 <section class="panel">
-  <nav class="admin-nav">
-    <a href="/admin/users">Users</a> ·
-    <a href="/admin/groups">Groups</a> ·
-    <a href="/admin/access">Access Matrix</a>
-  </nav>
-  {{if .Flash}}<p class="alert" role="alert">{{.Flash}}</p>{{end}}
-
-  <h1>Group: {{.Data.Group.Name}}</h1>
-  <p class="muted">{{.Data.Group.Description}}</p>
-
-  <h2>Anggota ({{len .Data.Members}})</h2>
+  <div class="panel-header"><div><h2>Anggota group</h2><p>{{len .Data.Members}} pengguna menjadi anggota group ini.</p></div></div>
   {{if .Data.Members}}
-  <table class="data-table">
-    <thead><tr><th>Username</th><th>Status</th><th>Aksi</th></tr></thead>
-    <tbody>
-      {{range .Data.Members}}
-      <tr>
-        <td>{{.Username}}</td>
-        <td>{{if .IsActive}}Aktif{{else}}Nonaktif{{end}}</td>
-        <td>
-          <form method="post" action="/admin/groups/{{$.Data.Group.ID}}/members/{{.ID}}/remove" class="inline">
-            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-            <button type="submit">Hapus dari group</button>
-          </form>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
+  <div class="table-wrapper"><table class="data-table">
+    <thead><tr><th>Username</th><th>Status akun</th><th>Aksi</th></tr></thead>
+    <tbody>{{range .Data.Members}}
+      <tr><td><strong>{{.Username}}</strong></td><td>{{if .IsActive}}<span class="badge badge-success">Aktif</span>{{else}}<span class="badge badge-failed">Nonaktif</span>{{end}}</td><td>
+        <form method="post" action="/admin/groups/{{$.Data.Group.ID}}/members/{{.ID}}/remove" class="inline-form" data-confirm="Hapus {{.Username}} dari group ini?"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button type="submit" class="btn-sm danger">Hapus dari group</button></form>
+      </td></tr>
+    {{end}}</tbody>
+  </table></div>
   {{else}}
-  <p class="muted">Belum ada anggota.</p>
+  <div class="empty-state"><span class="empty-state-icon" aria-hidden="true">♙</span><h3>Belum ada anggota</h3><p>Tambahkan pengguna yang perlu memperoleh akses melalui group ini.</p></div>
   {{end}}
+</section>
 
-  <h2>Tambah Anggota</h2>
+<section class="panel mt-2">
+  <div class="panel-header"><div><h2>Tambah anggota</h2><p>Pengguna yang tersedia dapat ditambahkan ke group ini.</p></div></div>
   {{if .Data.Available}}
-  <table class="data-table">
-    <thead><tr><th>Username</th><th>Aksi</th></tr></thead>
-    <tbody>
-      {{range .Data.Available}}
-      <tr>
-        <td>{{.Username}}{{if not .IsActive}} (nonaktif){{end}}</td>
-        <td>
-          <form method="post" action="/admin/groups/{{$.Data.Group.ID}}/members" class="inline">
-            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-            <input type="hidden" name="user_id" value="{{.ID}}">
-            <button type="submit" class="primary">Tambahkan</button>
-          </form>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
+  <div class="table-wrapper"><table class="data-table">
+    <thead><tr><th>Username</th><th>Status akun</th><th>Aksi</th></tr></thead>
+    <tbody>{{range .Data.Available}}
+      <tr><td><strong>{{.Username}}</strong></td><td>{{if .IsActive}}<span class="badge badge-success">Aktif</span>{{else}}<span class="badge badge-failed">Nonaktif</span>{{end}}</td><td>
+        <form method="post" action="/admin/groups/{{$.Data.Group.ID}}/members" class="inline-form"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><button type="submit" class="btn-sm primary">Tambahkan</button></form>
+      </td></tr>
+    {{end}}</tbody>
+  </table></div>
   {{else}}
-  <p class="muted">Semua user sudah menjadi anggota group ini.</p>
+  <div class="empty-state"><span class="empty-state-icon" aria-hidden="true">✓</span><h3>Semua pengguna sudah menjadi anggota</h3><p>Tidak ada pengguna lain yang dapat ditambahkan saat ini.</p></div>
   {{end}}
 </section>
 {{end}}

@@ -1,7 +1,9 @@
 {{define "content"}}
-<section class="panel narrow">
+<section class="empty-state error-page">
+  <span class="empty-state-icon" aria-hidden="true">!</span>
+  <p class="eyebrow">Permintaan tidak selesai</p>
   <h1>Terjadi kesalahan</h1>
-  <p>{{if .Flash}}{{.Flash}}{{else}}Permintaan tidak dapat diproses.{{end}}</p>
-  <a href="/">Kembali</a>
+  <p>Permintaan tidak dapat diproses. Periksa kembali akses dan data yang dikirim, lalu coba lagi.</p>
+  <div class="action-row"><a href="/" class="button primary">Kembali ke beranda</a><a href="/databases" class="button">Daftar database</a></div>
 </section>
 {{end}}
