@@ -210,6 +210,10 @@ func TestHandlerExplainMigration(t *testing.T) {
 	if r.lastTemplate != "migration/explain.html" {
 		t.Errorf("expected template migration/explain.html, got %s", r.lastTemplate)
 	}
+	// The executor returned an estimated plan even though ANALYZE was requested.
+	if r.lastData.Data.(map[string]any)["Analyzed"] != false {
+		t.Error("handler must report the actual plan status, not the checkbox")
+	}
 }
 
 func TestHandlerAuthorizationRejection(t *testing.T) {

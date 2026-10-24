@@ -1,0 +1,3 @@
+#LWP-Cookies-2.0
+Set-Cookie3: csrf_token="CA8f66zEXOhpZvUbICqAkFu_-ptopn-bji49pBoCDOk.oN1fGm7Gw0TCZKSEzPwTnaCLBKON1Jxi5EcvBG7DrJc"; path="/"; domain="localhost.local"; path_spec; discard; HttpOnly=None; SameSite=Strict; version=0
+Set-Cookie3: session_id="PHUz4oH5ksiXm1X3ZcVRc-rHnCxOWRkYskeAWpCCFvg"; path="/"; domain="localhost.local"; path_spec; expires="2026-10-25 06:03:48Z"; HttpOnly=None; SameSite=Lax; version=0

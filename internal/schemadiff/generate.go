@@ -2,14 +2,11 @@ package schemadiff
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/example/if3110-milestone1/internal/contract"
 )
-
-var simpleIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]*$`)
 
 // GenerateSQL converts schema changes to reviewable DDL for the selected engine.
 func GenerateSQL(changes []Change, engine contract.Engine) string {
@@ -35,10 +32,22 @@ func sortChanges(changes []Change) []Change {
 		AddColumn: 4, AlterColumn: 5, DropColumn: 6, DropTable: 7,
 		AddConstraint: 8, AddIndex: 9,
 	}
+	operationWeight := func(change Change) int {
+		// Referenced unique keys and supporting indexes must exist before FKs.
+		// Creating a MySQL FK first can auto-create an index that collides with
+		// the explicit index from the reference snapshot.
+		if change.Type == AddConstraint && change.Constraint != nil && strings.EqualFold(change.Constraint.Type, "FOREIGN KEY") {
+			return 10
+		}
+		return weight[change.Type]
+	}
 	sort.SliceStable(sorted, func(i, j int) bool {
 		left, right := sorted[i], sorted[j]
-		if weight[left.Type] != weight[right.Type] {
-			return weight[left.Type] < weight[right.Type]
+		if operationWeight(left) != operationWeight(right) {
+			return operationWeight(left) < operationWeight(right)
+		}
+		if left.TableSchema != right.TableSchema {
+			return left.TableSchema < right.TableSchema
 		}
 		if left.TableName != right.TableName {
 			return left.TableName < right.TableName
@@ -69,11 +78,11 @@ func generateSingle(change Change, engine contract.Engine) string {
 	case CreateTable:
 		return generateCreateTable(change.TableDef, engine)
 	case DropTable:
-		return fmt.Sprintf("DROP TABLE %s;", quote(change.TableName, engine))
+		return fmt.Sprintf("DROP TABLE %s;", qualify(change.TableSchema, change.TableName, engine))
 	case AddColumn:
-		return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s;", quote(change.TableName, engine), formatColumnDef(change.ColumnName, change.NewColumn, engine))
+		return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s;", qualify(change.TableSchema, change.TableName, engine), formatColumnDef(change.ColumnName, change.NewColumn, engine))
 	case DropColumn:
-		return fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", quote(change.TableName, engine), quote(change.ColumnName, engine))
+		return fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", qualify(change.TableSchema, change.TableName, engine), quote(change.ColumnName, engine))
 	case AlterColumn:
 		return generateAlterColumn(change, engine)
 	case AddConstraint:
@@ -97,7 +106,7 @@ func generateCreateTable(table *contract.Table, engine contract.Engine) string {
 	for _, column := range table.Columns {
 		columns = append(columns, "  "+formatColumnDef(column.Name, &column, engine))
 	}
-	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);", quote(table.Name, engine), strings.Join(columns, ",\n"))
+	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);", qualify(table.Schema, table.Name, engine), strings.Join(columns, ",\n"))
 }
 
 func formatColumnDef(name string, column *contract.Column, engine contract.Engine) string {
@@ -118,7 +127,7 @@ func generateAlterColumn(change Change, engine contract.Engine) string {
 	if change.OldColumn == nil || change.NewColumn == nil {
 		return "-- Cannot generate ALTER COLUMN: column definition is missing."
 	}
-	table := quote(change.TableName, engine)
+	table := qualify(change.TableSchema, change.TableName, engine)
 	columnName := quote(change.ColumnName, engine)
 	oldColumn, newColumn := change.OldColumn, change.NewColumn
 	if engine == contract.EngineMySQL || engine == contract.EngineMariaDB {
@@ -153,7 +162,12 @@ func generateAddConstraint(change Change, engine contract.Engine) string {
 	if err != nil {
 		return "-- Cannot generate ADD CONSTRAINT: " + err.Error()
 	}
-	return fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s %s;", quote(change.TableName, engine), quote(change.Constraint.Name, engine), definition)
+	if engine != contract.EnginePostgres && strings.EqualFold(strings.TrimSpace(change.Constraint.Type), "PRIMARY KEY") {
+		// MySQL reserves PRIMARY as the primary index name; ADD CONSTRAINT
+		// `PRIMARY` PRIMARY KEY is rejected by MariaDB.
+		return fmt.Sprintf("ALTER TABLE %s ADD %s;", qualify(change.TableSchema, change.TableName, engine), definition)
+	}
+	return fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s %s;", qualify(change.TableSchema, change.TableName, engine), quote(change.Constraint.Name, engine), definition)
 }
 
 func formatConstraintDefinition(constraint contract.Constraint, engine contract.Engine) (string, error) {
@@ -167,10 +181,25 @@ func formatConstraintDefinition(constraint contract.Constraint, engine contract.
 	case "UNIQUE":
 		return "UNIQUE (" + quoteNames(constraint.Columns, engine) + ")", nil
 	case "FOREIGN KEY":
-		if len(constraint.Columns) == 0 || len(constraint.RefColumns) == 0 || len(constraint.Columns) != len(constraint.RefColumns) || strings.TrimSpace(constraint.RefTable) == "" {
+		if len(constraint.Columns) == 0 || len(constraint.RefColumns) == 0 || len(constraint.Columns) != len(constraint.RefColumns) || (constraint.RefTable == "" && constraint.RefTableName == "") {
 			return "", fmt.Errorf("foreign key %q is missing columns or referenced table metadata", constraint.Name)
 		}
-		return "FOREIGN KEY (" + quoteNames(constraint.Columns, engine) + ") REFERENCES " + quoteQualified(constraint.RefTable, engine) + " (" + quoteNames(constraint.RefColumns, engine) + ")", nil
+		reference := quoteQualified(constraint.RefTable, engine)
+		if constraint.RefTableName != "" {
+			reference = qualify(constraint.RefSchema, constraint.RefTableName, engine)
+		}
+		definition := "FOREIGN KEY (" + quoteNames(constraint.Columns, engine) + ") REFERENCES " + reference + " (" + quoteNames(constraint.RefColumns, engine) + ")"
+		for _, rule := range []struct{ clause, action string }{{"ON DELETE", constraint.OnDelete}, {"ON UPDATE", constraint.OnUpdate}} {
+			action := strings.ToUpper(strings.TrimSpace(rule.action))
+			switch action {
+			case "":
+			case "NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT":
+				definition += " " + rule.clause + " " + action
+			default:
+				return "", fmt.Errorf("invalid foreign key action %q", rule.action)
+			}
+		}
+		return definition, nil
 	case "CHECK":
 		definition := strings.TrimSpace(constraint.Definition)
 		if definition == "" {
@@ -189,7 +218,7 @@ func generateDropConstraint(change Change, engine contract.Engine) string {
 	if change.Constraint == nil {
 		return "-- Cannot generate DROP CONSTRAINT: constraint definition is missing."
 	}
-	table, name := quote(change.TableName, engine), quote(change.Constraint.Name, engine)
+	table, name := qualify(change.TableSchema, change.TableName, engine), quote(change.Constraint.Name, engine)
 	if engine == contract.EnginePostgres {
 		return fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", table, name)
 	}
@@ -219,15 +248,25 @@ func generateAddIndex(change Change, engine contract.Engine) string {
 	if index.Unique {
 		unique = "UNIQUE "
 	}
-	columns := formatIndexColumns(index.Columns, engine)
-	table, indexName := quote(change.TableName, engine), quote(index.Name, engine)
+	columns := quoteNames(index.Columns, engine)
+	if len(index.KeyDefinitions) > 0 {
+		columns = strings.Join(index.KeyDefinitions, ", ")
+	}
+	table, indexName := qualify(change.TableSchema, change.TableName, engine), quote(index.Name, engine)
 	method := strings.TrimSpace(index.Method)
 	if engine == contract.EnginePostgres {
 		using := ""
 		if method != "" {
 			using = " USING " + method
 		}
-		return fmt.Sprintf("CREATE %sINDEX %s ON %s%s (%s);", unique, indexName, table, using, columns)
+		predicate := ""
+		if index.Predicate != "" {
+			predicate = " WHERE " + index.Predicate
+		}
+		return fmt.Sprintf("CREATE %sINDEX %s ON %s%s (%s)%s;", unique, indexName, table, using, columns, predicate)
+	}
+	if index.Predicate != "" {
+		return "-- Cannot generate partial index: this engine does not support WHERE on indexes."
 	}
 
 	indexKind, using := "INDEX", ""
@@ -255,45 +294,9 @@ func generateDropIndex(change Change, engine contract.Engine) string {
 	}
 	indexName := quote(change.Index.Name, engine)
 	if engine == contract.EnginePostgres {
-		return fmt.Sprintf("DROP INDEX %s;", indexName)
+		return fmt.Sprintf("DROP INDEX %s;", qualify(change.TableSchema, change.Index.Name, engine))
 	}
-	return fmt.Sprintf("DROP INDEX %s ON %s;", indexName, quote(change.TableName, engine))
-}
-
-func formatIndexColumns(columns []string, engine contract.Engine) string {
-	formatted := make([]string, 0, len(columns))
-	for _, column := range columns {
-		column = strings.TrimSpace(column)
-		if column == "" {
-			continue
-		}
-		if isIndexExpression(column) {
-			formatted = append(formatted, column)
-			continue
-		}
-		// Quote even nonstandard simple identifiers (for example, a column
-		// containing a dash); do not treat every non-identifier as an expression.
-		formatted = append(formatted, quote(column, engine))
-	}
-	return strings.Join(formatted, ", ")
-}
-
-func isIndexExpression(value string) bool {
-	if strings.HasPrefix(value, `"`) || strings.HasPrefix(value, "`") || strings.HasPrefix(value, "[") {
-		return true
-	}
-	if strings.ContainsAny(value, "()'") || strings.Contains(value, "::") ||
-		strings.Contains(value, "->") || strings.Contains(value, "||") {
-		return true
-	}
-	upper := strings.ToUpper(value)
-	for _, keyword := range []string{" DESC", " ASC", " NULLS ", " COLLATE "} {
-		if strings.Contains(upper, keyword) {
-			return true
-		}
-	}
-	return strings.Contains(value, " + ") || strings.Contains(value, " - ") ||
-		strings.Contains(value, " * ") || strings.Contains(value, " / ")
+	return fmt.Sprintf("DROP INDEX %s ON %s;", indexName, qualify(change.TableSchema, change.TableName, engine))
 }
 
 func quoteNames(names []string, engine contract.Engine) string {
@@ -310,6 +313,13 @@ func quoteQualified(name string, engine contract.Engine) string {
 		parts[index] = quote(part, engine)
 	}
 	return strings.Join(parts, ".")
+}
+
+func qualify(schema, name string, engine contract.Engine) string {
+	if schema == "" {
+		return quote(name, engine)
+	}
+	return quote(schema, engine) + "." + quote(name, engine)
 }
 
 func quote(name string, engine contract.Engine) string {

@@ -27,11 +27,11 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	case "created":
 		flash = "User berhasil dibuat."
 	case "deactivated":
-		flash = "User berhasil dinonaktifkan."
+		flash = "User berhasil dinonaktifkan dan seluruh session-nya dicabut."
 	case "activated":
-		flash = "User berhasil diaktifkan."
+		flash = "User berhasil diaktifkan. Session lama tetap tidak berlaku; user harus login ulang."
 	case "password-reset":
-		flash = "Password berhasil direset."
+		flash = "Password berhasil direset dan seluruh session user dicabut."
 	case "error":
 		flash = "Operasi gagal. Silakan coba lagi."
 	}
@@ -96,13 +96,9 @@ func (h *Handler) DeactivateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.logger.Error("deactivate user failed")
+		h.logger.Error("deactivate user failed", "user_id", targetID)
 		http.Redirect(w, r, "/admin/users?flash=error", http.StatusSeeOther)
 		return
-	}
-
-	if err := h.revoker.RevokeAllForUser(r.Context(), targetID); err != nil {
-		h.logger.Error("revoke sessions failed", "user_id", targetID)
 	}
 
 	http.Redirect(w, r, "/admin/users?flash=deactivated", http.StatusSeeOther)
@@ -161,7 +157,7 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		
-		h.logger.Error("reset password failed")
+		h.logger.Error("reset password failed", "user_id", targetID)
 		http.Redirect(w, r, "/admin/users?flash=error", http.StatusSeeOther)
 		return
 	}

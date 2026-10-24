@@ -1,0 +1,63 @@
+{
+  "checkedPages": [
+    {
+      "path": "/",
+      "background": "rgb(244, 246, 250)",
+      "inlineEvents": 0,
+      "inlineScripts": 0,
+      "allPostFormsHaveCSRF": true
+    },
+    {
+      "path": "/admin/connections/10/edit",
+      "background": "rgb(244, 246, 250)",
+      "inlineEvents": 0,
+      "inlineScripts": 0,
+      "allPostFormsHaveCSRF": true
+    },
+    {
+      "path": "/admin/connections",
+      "background": "rgb(244, 246, 250)",
+      "inlineEvents": 0,
+      "inlineScripts": 0,
+      "allPostFormsHaveCSRF": true
+    },
+    {
+      "path": "/admin/groups",
+      "background": "rgb(244, 246, 250)",
+      "inlineEvents": 0,
+      "inlineScripts": 0,
+      "allPostFormsHaveCSRF": true
+    },
+    {
+      "path": "/admin/access",
+      "background": "rgb(244, 246, 250)",
+      "inlineEvents": 0,
+      "inlineScripts": 0,
+      "allPostFormsHaveCSRF": true
+    },
+    {
+      "path": "/admin/users",
+      "background": "rgb(244, 246, 250)",
+      "inlineEvents": 0,
+      "inlineScripts": 0,
+      "allPostFormsHaveCSRF": true
+    },
+    {
+      "path": "/databases/10/migrations/10",
+      "background": "rgb(244, 246, 250)",
+      "inlineEvents": 0,
+      "inlineScripts": 0,
+      "allPostFormsHaveCSRF": true
+    }
+  ],
+  "finalPage": {
+    "appInlineEvents": 0,
+    "appInlineScripts": 0,
+    "appInlineStyles": 0,
+    "bodyBackground": "rgb(244, 246, 250)",
+    "cssHref": "/static/css/app.css",
+    "page": "/databases/10/migrations/10/execute",
+    "primaryButtonBackground": null
+  },
+  "dialogCancellation": "Not verified: getJsDialog returned undefined; completed actions verified on website."
+}

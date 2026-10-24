@@ -15,6 +15,8 @@ import (
 
 var ErrInvalid = errors.New("session tidak valid")
 
+var ErrCredentialsChanged = errors.New("kredensial akun sudah berubah atau akun tidak aktif")
+
 type Config struct {
 	IdleTimeout     time.Duration
 	AbsoluteTimeout time.Duration
@@ -33,6 +35,7 @@ func DefaultConfig() Config {
 
 type Store interface {
 	Create(ctx context.Context, userID int64, now time.Time) (string, contract.SessionInfo, error)
+	CreateVerified(ctx context.Context, userID int64, verifiedPasswordHash string, now time.Time) (string, contract.SessionInfo, error)
 	Load(ctx context.Context, rawID string, now time.Time) (contract.SessionInfo, error)
 	Rotate(ctx context.Context, rawID string, now time.Time) (string, contract.SessionInfo, error)
 	Revoke(ctx context.Context, rawID string) error
@@ -49,18 +52,50 @@ func NewSQLStore(db *sql.DB, cfg Config) *SQLStore {
 }
 
 func (s *SQLStore) Create(ctx context.Context, userID int64, now time.Time) (string, contract.SessionInfo, error) {
+	return s.create(ctx, userID, nil, now)
+}
+
+// CreateVerified binds login to the password hash that was actually verified.
+// Account updates lock the same user row before revoking sessions: either this
+// session is created first and revoked by the update, or stale login is rejected.
+func (s *SQLStore) CreateVerified(ctx context.Context, userID int64, verifiedPasswordHash string, now time.Time) (string, contract.SessionInfo, error) {
+	return s.create(ctx, userID, &verifiedPasswordHash, now)
+}
+
+func (s *SQLStore) create(ctx context.Context, userID int64, verifiedPasswordHash *string, now time.Time) (string, contract.SessionInfo, error) {
 	raw, err := newID()
 	if err != nil {
 		return "", contract.SessionInfo{}, err
 	}
 	info := contract.SessionInfo{UserID: userID, CreatedAt: now, LastSeenAt: now, RotatedAt: now, AbsoluteExpiresAt: now.Add(s.cfg.AbsoluteTimeout), IsCurrentID: true}
-	err = s.db.QueryRowContext(ctx, `INSERT INTO sessions
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", contract.SessionInfo{}, fmt.Errorf("mulai transaksi session: %w", err)
+	}
+	defer tx.Rollback()
+
+	var currentHash string
+	var active bool
+	err = tx.QueryRowContext(ctx, `SELECT password_hash, is_active, privilege_version
+		FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&currentHash, &active, &info.PrivilegeVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", contract.SessionInfo{}, ErrCredentialsChanged
+	}
+	if err != nil {
+		return "", contract.SessionInfo{}, fmt.Errorf("kunci akun untuk session: %w", err)
+	}
+	if !active || (verifiedPasswordHash != nil && (*verifiedPasswordHash == "" || *verifiedPasswordHash != currentHash)) {
+		return "", contract.SessionInfo{}, ErrCredentialsChanged
+	}
+
+	_, err = tx.ExecContext(ctx, `INSERT INTO sessions
 		(user_id, id_hash, created_at, last_seen_at, rotated_at, absolute_expires_at, privilege_version)
-		SELECT id, $2, $3, $3, $3, $4, privilege_version
-		FROM users WHERE id = $1
-		RETURNING privilege_version`, userID, hashID(raw), now, info.AbsoluteExpiresAt).Scan(&info.PrivilegeVersion)
+		VALUES ($1, $2, $3, $3, $3, $4, $5)`, userID, hashID(raw), now, info.AbsoluteExpiresAt, info.PrivilegeVersion)
 	if err != nil {
 		return "", contract.SessionInfo{}, fmt.Errorf("buat session: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", contract.SessionInfo{}, fmt.Errorf("commit session: %w", err)
 	}
 	info.CurrentPrivilegeVersion = info.PrivilegeVersion
 	return raw, info, nil

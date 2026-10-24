@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  document.addEventListener("DOMContentLoaded", () => {
+  function initConnections() {
     const testButton = document.getElementById("btn-test-conn");
     const result = document.getElementById("test-result");
     const form = document.getElementById("connection-form");
@@ -39,7 +39,15 @@
 
     document.querySelectorAll("form.delete-form").forEach((formElement) => {
       if (!(formElement instanceof HTMLFormElement)) return;
-      formElement.dataset.confirm = `Hapus profil koneksi "${formElement.dataset.name || "ini"}"? Tindakan ini tidak dapat dibatalkan.`;
+      if (!formElement.dataset.confirm) {
+        formElement.dataset.confirm = `Hapus profil koneksi "${formElement.dataset.name || "ini"}"? Tindakan ini tidak dapat dibatalkan.`;
+      }
     });
-  });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initConnections);
+  } else {
+    initConnections();
+  }
 })();

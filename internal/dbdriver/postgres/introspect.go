@@ -31,7 +31,6 @@ func QualifyTable(schema, table string) string {
 	return QuoteIdentifier(schema) + "." + QuoteIdentifier(table)
 }
 
-
 func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.SchemaSnapshot, error) {
 	snapshot := contract.SchemaSnapshot{
 		Engine: contract.EnginePostgres,
@@ -59,7 +58,7 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 		if err := rows.Scan(&schema, &name); err != nil {
 			return snapshot, fmt.Errorf("scan table: %w", err)
 		}
-		key := schema + "." + name
+		key := schema + "\x00" + name
 		t := &contract.Table{
 			Schema:      schema,
 			Name:        name,
@@ -108,7 +107,7 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 			return snapshot, fmt.Errorf("scan column: %w", err)
 		}
 
-		key := schema + "." + table
+		key := schema + "\x00" + table
 		t, ok := tableMap[key]
 		if !ok {
 			continue
@@ -141,7 +140,9 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 			c.contype::text,
 			COALESCE(ref_ns.nspname, '') AS ref_schema,
 			COALESCE(ref_cls.relname, '') AS ref_table,
-			pg_get_constraintdef(c.oid, true) AS def
+			pg_get_constraintdef(c.oid, true) AS def,
+			CASE c.confdeltype WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' ELSE '' END,
+			CASE c.confupdtype WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' ELSE '' END
 		FROM pg_constraint c
 		JOIN pg_class cls ON cls.oid = c.conrelid
 		JOIN pg_namespace ns ON ns.oid = cls.relnamespace
@@ -166,9 +167,9 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 
 	for consRows.Next() {
 		var oid uint32
-		var schema, table, name, conType, refSchema, refTable, def string
+		var schema, table, name, conType, refSchema, refTable, def, onDelete, onUpdate string
 
-		if err := consRows.Scan(&oid, &schema, &table, &name, &conType, &refSchema, &refTable, &def); err != nil {
+		if err := consRows.Scan(&oid, &schema, &table, &name, &conType, &refSchema, &refTable, &def, &onDelete, &onUpdate); err != nil {
 			return snapshot, fmt.Errorf("scan constraint: %w", err)
 		}
 
@@ -194,6 +195,8 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 		}
 
 		if cType == "FOREIGN KEY" && refTable != "" {
+			c.RefSchema, c.RefTableName = refSchema, refTable
+			c.OnDelete, c.OnUpdate = onDelete, onUpdate
 			if refSchema != "" {
 				c.RefTable = refSchema + "." + refTable
 			} else {
@@ -203,7 +206,7 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 		}
 
 		meta := &consMeta{
-			tableKey: schema + "." + table,
+			tableKey: schema + "\x00" + table,
 			cons:     c,
 		}
 		consByOID[oid] = meta
@@ -297,7 +300,8 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 			tbl.relname AS table_name,
 			idx_cls.relname AS index_name,
 			am.amname AS index_method,
-			idx.indisunique AS is_unique
+			idx.indisunique AS is_unique,
+			COALESCE(pg_get_expr(idx.indpred, idx.indrelid), '') AS predicate
 		FROM pg_index idx
 		JOIN pg_class idx_cls ON idx_cls.oid = idx.indexrelid
 		JOIN pg_class tbl ON tbl.oid = idx.indrelid
@@ -322,22 +326,23 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 
 	for idxRows.Next() {
 		var oid uint32
-		var schema, table, idxName, method string
+		var schema, table, idxName, method, predicate string
 		var isUnique bool
 
-		if err := idxRows.Scan(&oid, &schema, &table, &idxName, &method, &isUnique); err != nil {
+		if err := idxRows.Scan(&oid, &schema, &table, &idxName, &method, &isUnique, &predicate); err != nil {
 			return snapshot, fmt.Errorf("scan index: %w", err)
 		}
 
 		i := &contract.Index{
-			Name:    idxName,
-			Columns: make([]string, 0),
-			Unique:  isUnique,
-			Method:  method,
+			Name:      idxName,
+			Columns:   make([]string, 0),
+			Unique:    isUnique,
+			Method:    method,
+			Predicate: predicate,
 		}
 
 		meta := &idxMeta{
-			tableKey: schema + "." + table,
+			tableKey: schema + "\x00" + table,
 			idx:      i,
 		}
 		idxByOID[oid] = meta
@@ -350,11 +355,20 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 	idxColsQuery := `SELECT
 			idx.indexrelid AS index_oid,
 			k.pos AS key_pos,
-			pg_get_indexdef(idx.indexrelid, k.pos, true) AS col_def
+			pg_get_indexdef(idx.indexrelid, k.pos, true) ||
+			CASE WHEN am.amname = 'btree' THEN
+				CASE WHEN (idx.indoption[k.pos - 1] & 1) <> 0 THEN ' DESC' ELSE '' END ||
+				CASE WHEN (idx.indoption[k.pos - 1] & 3) = 2 THEN ' NULLS FIRST'
+				     WHEN (idx.indoption[k.pos - 1] & 3) = 1 THEN ' NULLS LAST' ELSE '' END
+			ELSE '' END AS col_def,
+			COALESCE(att.attname, '') AS column_name
 		FROM pg_index idx
 		JOIN pg_class tbl ON tbl.oid = idx.indrelid
 		JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+		JOIN pg_class idx_cls ON idx_cls.oid = idx.indexrelid
+		JOIN pg_am am ON am.oid = idx_cls.relam
 		CROSS JOIN LATERAL generate_series(1, idx.indnkeyatts) AS k(pos)
+		LEFT JOIN pg_attribute att ON att.attrelid = idx.indrelid AND att.attnum = idx.indkey[k.pos - 1]
 		WHERE ns.nspname NOT IN ('pg_catalog', 'information_schema')
 		  AND tbl.relkind IN ('r', 'p')
 		ORDER BY idx.indexrelid, k.pos`
@@ -368,9 +382,9 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 	for idxColsRows.Next() {
 		var oid uint32
 		var pos int
-		var colDef string
+		var colDef, colName string
 
-		if err := idxColsRows.Scan(&oid, &pos, &colDef); err != nil {
+		if err := idxColsRows.Scan(&oid, &pos, &colDef, &colName); err != nil {
 			return snapshot, fmt.Errorf("scan index column: %w", err)
 		}
 
@@ -378,7 +392,11 @@ func (i *Introspector) Snapshot(ctx context.Context, db *sql.DB) (contract.Schem
 		if !ok {
 			continue
 		}
-		meta.idx.Columns = append(meta.idx.Columns, colDef)
+		if colName == "" {
+			colName = colDef
+		}
+		meta.idx.Columns = append(meta.idx.Columns, colName)
+		meta.idx.KeyDefinitions = append(meta.idx.KeyDefinitions, colDef)
 	}
 	if err := idxColsRows.Err(); err != nil {
 		return snapshot, fmt.Errorf("iterate index columns: %w", err)

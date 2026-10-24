@@ -3,15 +3,18 @@
   <div class="page-header-main">
     <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Beranda</a><span aria-hidden="true">/</span><a href="/databases">Database</a><span aria-hidden="true">/</span><a href="/databases/{{.Data.DBID}}/migrations">Migration</a><span aria-hidden="true">/</span><a href="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}">#{{.Data.Migration.ID}}</a><span aria-hidden="true">/</span><span aria-current="page">Execution plan</span></nav>
     <p class="eyebrow">Analisis query</p>
-    <div class="explain-heading"><h1>Execution plan</h1>{{if .Data.Analyzed}}<span class="badge badge-warning">EXPLAIN ANALYZE diminta</span>{{else}}<span class="badge badge-view">Estimasi EXPLAIN</span>{{end}}</div>
+    <div class="explain-heading"><h1>Execution plan</h1>{{if .Data.Plan.Analyzed}}<span class="badge badge-edit">Analisis aktual</span>{{else}}<span class="badge badge-view">Estimasi EXPLAIN</span>{{end}}</div>
     <p class="page-description">Rencana yang dikembalikan database untuk SQL migration <strong>{{.Data.Migration.Title}}</strong>.</p>
   </div>
   <div class="page-header-actions"><a class="button" href="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}">Kembali ke detail</a></div>
 </header>
 
+{{if .Data.Plan.Notice}}<div class="flash-message flash-info" role="status">{{.Data.Plan.Notice}}</div>{{end}}
+{{if .Data.Plan.MetricsNote}}<p class="muted">{{.Data.Plan.MetricsNote}}</p>{{end}}
+
 <section class="metric-grid mb-1" aria-label="Ringkasan execution plan">
-  <div class="metric-card"><span class="metric-label">Estimated total cost</span><strong class="metric-value text-brand">{{derefFloat .Data.Plan.Root.TotalCost}}</strong></div>
-  <div class="metric-card"><span class="metric-label">Estimated rows</span><strong class="metric-value">{{.Data.Plan.Root.PlanRows}}</strong><span class="muted">baris</span></div>
+  <div class="metric-card"><span class="metric-label">Estimated total cost</span><strong class="metric-value text-brand">{{if .Data.Plan.Root.CostAvailable}}{{printf "%g" .Data.Plan.Root.TotalCost}}{{else}}—{{end}}</strong></div>
+  <div class="metric-card"><span class="metric-label">Estimated rows</span><strong class="metric-value">{{if .Data.Plan.Root.PlanRowsAvailable}}{{.Data.Plan.Root.PlanRows}}{{else}}—{{end}}</strong><span class="muted">baris</span></div>
   {{if .Data.Plan.PlanningMs}}<div class="metric-card"><span class="metric-label">Planning time</span><strong class="metric-value">{{derefFloat .Data.Plan.PlanningMs}}</strong><span class="muted">ms</span></div>{{end}}
   {{if .Data.Plan.ExecutionMs}}<div class="metric-card"><span class="metric-label">Execution time</span><strong class="metric-value text-success">{{derefFloat .Data.Plan.ExecutionMs}}</strong><span class="muted">ms</span></div>{{end}}
 </section>
@@ -19,13 +22,8 @@
 <section class="panel mb-1">
   <div class="panel-header"><div><h2>Node execution plan</h2><p>Detail scan, relasi, index, estimasi cost, dan metrik aktual jika tersedia.</p></div></div>
   <div class="table-wrapper"><table class="data-table">
-    <thead><tr><th>Node / scan / join</th><th>Relasi</th><th>Index</th><th>Startup → total cost</th><th>Estimasi baris</th><th>Baris aktual</th><th>Waktu aktual</th></tr></thead>
-    <tbody>
-      <tr><td><strong class="text-brand">{{.Data.Plan.Root.NodeType}}</strong></td><td>{{if .Data.Plan.Root.Relation}}<code>{{.Data.Plan.Root.Relation}}</code>{{else}}—{{end}}</td><td>{{if .Data.Plan.Root.IndexName}}<code>{{.Data.Plan.Root.IndexName}}</code>{{else}}—{{end}}</td><td class="mono">{{derefFloat .Data.Plan.Root.StartupCost}} → {{derefFloat .Data.Plan.Root.TotalCost}}</td><td>{{.Data.Plan.Root.PlanRows}}</td><td>{{if .Data.Plan.Root.ActualRows}}{{.Data.Plan.Root.ActualRows}}{{else}}—{{end}}</td><td>{{if .Data.Plan.Root.ActualTimeMs}}{{derefFloat .Data.Plan.Root.ActualTimeMs}} ms{{else}}—{{end}}</td></tr>
-      {{range .Data.Plan.Root.Children}}
-      <tr><td><span class="node-child">↳</span> {{.NodeType}}</td><td>{{if .Relation}}<code>{{.Relation}}</code>{{else}}—{{end}}</td><td>{{if .IndexName}}<code>{{.IndexName}}</code>{{else}}—{{end}}</td><td class="mono">{{derefFloat .StartupCost}} → {{derefFloat .TotalCost}}</td><td>{{.PlanRows}}</td><td>{{if .ActualRows}}{{.ActualRows}}{{else}}—{{end}}</td><td>{{if .ActualTimeMs}}{{derefFloat .ActualTimeMs}} ms{{else}}—{{end}}</td></tr>
-      {{end}}
-    </tbody>
+    <thead><tr><th>Node / scan / join</th><th>Relasi</th><th>Index</th><th>Startup → total cost</th><th>Estimasi baris</th><th>Baris aktual / loop</th><th>Loops</th><th>Waktu aktual (ms)</th></tr></thead>
+    <tbody>{{template "plan-row" .Data.Plan.Root}}</tbody>
   </table></div>
 </section>
 
@@ -33,4 +31,9 @@
   <div class="panel-header"><div><h2>Output mentah</h2><p>Output engine untuk penelusuran detail.</p></div></div>
   <pre class="code-block raw-output"><code>{{.Data.Plan.Raw}}</code></pre>
 </section>
+{{end}}
+
+{{define "plan-row"}}
+<tr><td><strong class="text-brand">{{.NodeType}}</strong></td><td>{{if .Relation}}<code>{{.Relation}}</code>{{else}}—{{end}}</td><td>{{if .IndexName}}<code>{{.IndexName}}</code>{{else}}—{{end}}</td><td class="mono">{{if .StartupCostAvailable}}{{printf "%g" .StartupCost}}{{else}}—{{end}} → {{if .CostAvailable}}{{printf "%g" .TotalCost}}{{else}}—{{end}}</td><td>{{if .PlanRowsAvailable}}{{.PlanRows}}{{else}}—{{end}}</td><td>{{actualRows .}}</td><td>{{if .ActualLoops}}{{.ActualLoops}}{{else}}—{{end}}</td><td>{{if .ActualTimeMs}}{{derefFloat .ActualTimeMs}} ms{{else}}—{{end}}</td></tr>
+{{range .Children}}{{template "plan-row" .}}{{end}}
 {{end}}

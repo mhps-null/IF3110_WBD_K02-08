@@ -395,7 +395,7 @@ func (h *Handler) ExplainMigration(w http.ResponseWriter, r *http.Request) {
 			"DBID":      dbID,
 			"Migration": m,
 			"Plan":      plan,
-			"Analyzed":  analyze,
+			"Analyzed":  plan.Analyzed,
 		},
 	}
 

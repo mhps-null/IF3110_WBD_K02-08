@@ -86,7 +86,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		flash = "Connection deleted successfully."
 	}
 	if errMsg := r.URL.Query().Get("err"); errMsg != "" {
-		flash = "Error: " + errMsg
+		if errMsg == "cannot_delete_has_migration_history" {
+			flash = "Koneksi tidak dapat dihapus karena masih memiliki riwayat migration. Riwayat tersebut harus tetap disimpan untuk keperluan audit."
+		} else {
+			flash = "Error: " + errMsg
+		}
 	}
 
 	data := struct {

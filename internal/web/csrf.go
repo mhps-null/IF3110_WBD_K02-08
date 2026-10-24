@@ -43,7 +43,11 @@ func (m *CSRFMiddleware) Wrap(next http.Handler) http.Handler {
 		}
 
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-			r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+			maxBytes := int64(64 << 10)
+			if strings.Contains(r.URL.Path, "/migrations") {
+				maxBytes = 1 << 20
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 			if err := r.ParseForm(); err != nil {
 				http.Error(w, "Permintaan tidak valid.", http.StatusBadRequest)
 				return

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/example/if3110-milestone1/internal/contract"
-	"github.com/example/if3110-milestone1/internal/explain"
 )
 
 var (
@@ -174,60 +173,4 @@ func resultFromSQLResult(res sql.Result, start time.Time) contract.ExecResult {
 		}
 	}
 	return contract.ExecResult{RowsAffected: rowsAffected, Duration: time.Since(start)}
-}
-
-func (e *Executor) Explain(ctx context.Context, db *sql.DB, sqlText string, analyze bool) (contract.Plan, error) {
-	trimmed := strings.TrimSpace(sqlText)
-	if trimmed == "" {
-		return contract.Plan{}, errors.New("SQL query cannot be empty")
-	}
-
-	if IsDDLStatement(trimmed) {
-		return contract.Plan{
-			Root: contract.PlanNode{
-				NodeType: "DDL Statement (EXPLAIN tidak tersedia)",
-			},
-			Analyzed: false,
-			Raw:      "EXPLAIN tidak didukung untuk DDL statement pada MySQL/MariaDB.",
-		}, nil
-	}
-
-	var query string
-	if analyze {
-		query = "EXPLAIN ANALYZE " + trimmed
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			return contract.Plan{}, fmt.Errorf("failed to start explain analyze transaction: %w", err)
-		}
-		defer func() {
-			_ = tx.Rollback()
-		}()
-
-		var rawText string
-		row := tx.QueryRowContext(ctx, query)
-		if err := row.Scan(&rawText); err != nil {
-			return e.explainJSON(ctx, db, trimmed, false)
-		}
-
-		return contract.Plan{
-			Root: contract.PlanNode{
-				NodeType: "MySQL EXPLAIN ANALYZE",
-			},
-			Analyzed: true,
-			Raw:      rawText,
-		}, nil
-	}
-
-	return e.explainJSON(ctx, db, trimmed, analyze)
-}
-
-func (e *Executor) explainJSON(ctx context.Context, db *sql.DB, trimmed string, analyze bool) (contract.Plan, error) {
-	query := "EXPLAIN FORMAT=JSON " + trimmed
-	var rawJSON string
-	row := db.QueryRowContext(ctx, query)
-	if err := row.Scan(&rawJSON); err != nil {
-		return contract.Plan{}, fmt.Errorf("mysql explain format=json query failed: %w", err)
-	}
-
-	return explain.ParseMySQLPlan(rawJSON, analyze)
 }

@@ -31,9 +31,19 @@ func (f fakeUserRepo) FindByID(_ context.Context, id int64) (User, error) {
 }
 
 type fakeSessions struct {
-	valid     map[string]contract.SessionInfo
-	rotateErr error
-	loadErr   error
+	valid        map[string]contract.SessionInfo
+	rotateErr    error
+	loadErr      error
+	createErr    error
+	verifiedHash string
+}
+
+func (f *fakeSessions) CreateVerified(ctx context.Context, id int64, hash string, now time.Time) (string, contract.SessionInfo, error) {
+	f.verifiedHash = hash
+	if f.createErr != nil {
+		return "", contract.SessionInfo{}, f.createErr
+	}
+	return f.Create(ctx, id, now)
 }
 
 func (f *fakeSessions) Create(_ context.Context, id int64, now time.Time) (string, contract.SessionInfo, error) {
@@ -146,6 +156,9 @@ func TestLogin(t *testing.T) {
 				return
 			}
 			cookies := rec.Result().Cookies()
+			if sessions.verifiedHash != hash {
+				t.Fatal("session creation must receive the password hash verified by login")
+			}
 			if len(cookies) != 1 || cookies[0].Name != sessionCookieName || !cookies[0].HttpOnly || !cookies[0].Secure || cookies[0].SameSite != http.SameSiteLaxMode {
 				t.Fatal("session cookie missing/insecure")
 			}
@@ -153,6 +166,25 @@ func TestLogin(t *testing.T) {
 				t.Fatal("session not created")
 			}
 		})
+	}
+}
+
+func TestLoginRejectsCredentialsChangedBeforeSessionCreation(t *testing.T) {
+	hash, err := password.Hash("valid-test-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := &fakeSessions{
+		valid: map[string]contract.SessionInfo{}, createErr: session.ErrCredentialsChanged,
+	}
+	h := NewHandler(fakeUserRepo{User{ID: 1, Username: "alice", PasswordHash: hash, IsActive: true}}, sessions, fakeRenderer{}, false, session.DefaultConfig(), nil)
+	rec := httptest.NewRecorder()
+	h.Login(rec, loginRequest("alice", "valid-test-password"))
+	if rec.Code != http.StatusUnauthorized || len(rec.Result().Cookies()) != 0 || len(sessions.valid) != 0 {
+		t.Fatal("stale credentials must fail login without issuing a session cookie")
+	}
+	if rec.Body.String() != "Username atau password salah." {
+		t.Fatal("credential changes must use the generic login failure message")
 	}
 }
 
