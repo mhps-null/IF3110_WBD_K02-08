@@ -25,23 +25,41 @@ func NewHandler(service Service, renderer Renderer, guards contract.Guards) *Han
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	h.RegisterRoutesWithAuth(mux, func(next http.Handler) http.Handler { return next })
+}
+
+// RegisterRoutesWithAuth ensures the authenticated principal is populated before
+// database authorization checks run. Missing security middleware fails closed.
+func (h *Handler) RegisterRoutesWithAuth(mux *http.ServeMux, authenticate func(http.Handler) http.Handler) {
+	deny := func(message string) func(http.Handler) http.Handler {
+		return func(http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, message, http.StatusForbidden)
+			})
+		}
+	}
+	if authenticate == nil {
+		authenticate = deny("Access denied: authentication middleware not configured")
+	}
 	viewDB := h.guards.ViewDB
 	if viewDB == nil {
-		viewDB = func(next http.Handler) http.Handler { return next }
+		viewDB = deny("Access denied: database view guard not configured")
 	}
 	editDB := h.guards.EditDB
 	if editDB == nil {
-		editDB = func(next http.Handler) http.Handler { return next }
+		editDB = deny("Access denied: database edit guard not configured")
 	}
 
-	mux.Handle("GET /databases/{id}/migrations", viewDB(http.HandlerFunc(h.ListMigrations)))
-	mux.Handle("GET /databases/{id}/migrations/new", editDB(http.HandlerFunc(h.NewMigrationPage)))
-	mux.Handle("POST /databases/{id}/migrations/new", editDB(http.HandlerFunc(h.PrefillMigrationPage)))
-	mux.Handle("POST /databases/{id}/migrations", editDB(http.HandlerFunc(h.CreateMigration)))
-	mux.Handle("GET /databases/{id}/migrations/{mid}", viewDB(http.HandlerFunc(h.MigrationDetail)))
-	mux.Handle("POST /databases/{id}/migrations/{mid}", editDB(http.HandlerFunc(h.UpdateMigration)))
-	mux.Handle("POST /databases/{id}/migrations/{mid}/execute", editDB(http.HandlerFunc(h.ExecuteMigration)))
-	mux.Handle("POST /databases/{id}/migrations/{mid}/explain", editDB(http.HandlerFunc(h.ExplainMigration)))
+	wrapView := func(handler http.HandlerFunc) http.Handler { return authenticate(viewDB(handler)) }
+	wrapEdit := func(handler http.HandlerFunc) http.Handler { return authenticate(editDB(handler)) }
+	mux.Handle("GET /databases/{id}/migrations", wrapView(h.ListMigrations))
+	mux.Handle("GET /databases/{id}/migrations/new", wrapEdit(h.NewMigrationPage))
+	mux.Handle("POST /databases/{id}/migrations/new", wrapEdit(h.PrefillMigrationPage))
+	mux.Handle("POST /databases/{id}/migrations", wrapEdit(h.CreateMigration))
+	mux.Handle("GET /databases/{id}/migrations/{mid}", wrapView(h.MigrationDetail))
+	mux.Handle("POST /databases/{id}/migrations/{mid}", wrapEdit(h.UpdateMigration))
+	mux.Handle("POST /databases/{id}/migrations/{mid}/execute", wrapEdit(h.ExecuteMigration))
+	mux.Handle("POST /databases/{id}/migrations/{mid}/explain", wrapEdit(h.ExplainMigration))
 }
 
 func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {

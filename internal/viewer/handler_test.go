@@ -152,3 +152,21 @@ func TestViewerErrorsAndEngine(t *testing.T) {
 		t.Fatal("MySQL engine/default schema routing failed")
 	}
 }
+
+func TestRegisterRoutesWithAuthAuthenticatesDatabaseList(t *testing.T) {
+	h, _, _ := viewerSetup()
+	mux := http.NewServeMux()
+	authenticate := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r = r.WithContext(contract.WithPrincipal(r.Context(), contract.Principal{UserID: 1}))
+			next.ServeHTTP(w, r)
+		})
+	}
+	h.RegisterRoutesWithAuth(mux, authenticate)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/databases", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}

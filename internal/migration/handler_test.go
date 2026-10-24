@@ -460,3 +460,15 @@ func TestMigrationDetailTemplateDoesNotExposeStoredInternalError(t *testing.T) {
 		t.Fatal("generic migration error message is missing from the detail template")
 	}
 }
+
+func TestMigrationRoutesFailClosedWithoutDatabaseGuards(t *testing.T) {
+	h := NewHandler(nil, nil, contract.Guards{})
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/databases/1/migrations", nil))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d, want %d", rec.Code, http.StatusForbidden)
+	}
+}

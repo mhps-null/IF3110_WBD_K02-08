@@ -145,3 +145,27 @@ func TestConnectionHandlerFailures(t *testing.T) {
 		t.Fatalf("test connection: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestRegisterRoutesWithAuthEstablishesPrincipalBeforeAdminGuard(t *testing.T) {
+	repo, err := NewMemoryRepository(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	guards := testutil.NewFakeGuards(testutil.NewFakeAccessChecker())
+	mux := http.NewServeMux()
+	authCalled := false
+	authenticate := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authCalled = true
+			r = r.WithContext(contract.WithPrincipal(r.Context(), contract.Principal{UserID: 1, IsPlatformAdmin: true}))
+			next.ServeHTTP(w, r)
+		})
+	}
+	NewHandler(repo, nil, &dummyRenderer{}, guards).RegisterRoutesWithAuth(mux, authenticate)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/connections", nil))
+	if rec.Code != http.StatusOK || !authCalled {
+		t.Fatalf("status=%d authCalled=%t", rec.Code, authCalled)
+	}
+}

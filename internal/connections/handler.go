@@ -31,22 +31,39 @@ func NewHandler(repo Repository, poolMgr *PoolManager, renderer Renderer, guards
 }
 
 // RegisterRoutes registers connection management routes with admin authorization guards.
+// It preserves the unauthenticated unit-test interface; production wiring should use
+// RegisterRoutesWithAuth so the principal is established before authorization runs.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	h.RegisterRoutesWithAuth(mux, func(next http.Handler) http.Handler { return next })
+}
+
+// RegisterRoutesWithAuth registers the routes behind authentication and the platform-admin guard.
+func (h *Handler) RegisterRoutesWithAuth(mux *http.ServeMux, authenticate func(http.Handler) http.Handler) {
+	if authenticate == nil {
+		authenticate = func(http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "Access denied: authentication middleware not configured", http.StatusForbidden)
+			})
+		}
+	}
 	admin := h.guards.Admin
 	if admin == nil {
 		admin = func(http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				http.Error(w, "Access denied: security guard not configured", http.StatusForbidden)
 			})
 		}
 	}
 
-	mux.Handle("GET /admin/connections", admin(http.HandlerFunc(h.List)))
-	mux.Handle("POST /admin/connections", admin(http.HandlerFunc(h.Create)))
-	mux.Handle("GET /admin/connections/{id}/edit", admin(http.HandlerFunc(h.EditForm)))
-	mux.Handle("POST /admin/connections/{id}/edit", admin(http.HandlerFunc(h.Update)))
-	mux.Handle("POST /admin/connections/{id}/delete", admin(http.HandlerFunc(h.Delete)))
-	mux.Handle("POST /admin/connections/test", admin(http.HandlerFunc(h.TestConnection)))
+	wrap := func(handler http.HandlerFunc) http.Handler {
+		return authenticate(admin(handler))
+	}
+	mux.Handle("GET /admin/connections", wrap(h.List))
+	mux.Handle("POST /admin/connections", wrap(h.Create))
+	mux.Handle("GET /admin/connections/{id}/edit", wrap(h.EditForm))
+	mux.Handle("POST /admin/connections/{id}/edit", wrap(h.Update))
+	mux.Handle("POST /admin/connections/{id}/delete", wrap(h.Delete))
+	mux.Handle("POST /admin/connections/test", wrap(h.TestConnection))
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {

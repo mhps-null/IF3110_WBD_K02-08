@@ -15,7 +15,13 @@ import (
 	"github.com/example/if3110-milestone1/internal/admin"
 	"github.com/example/if3110-milestone1/internal/auth"
 	"github.com/example/if3110-milestone1/internal/config"
+	"github.com/example/if3110-milestone1/internal/connections"
+	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/example/if3110-milestone1/internal/dbdriver/mysql"
+	"github.com/example/if3110-milestone1/internal/dbdriver/postgres"
+	"github.com/example/if3110-milestone1/internal/migration"
 	"github.com/example/if3110-milestone1/internal/session"
+	"github.com/example/if3110-milestone1/internal/viewer"
 	"github.com/example/if3110-milestone1/internal/web"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -62,9 +68,47 @@ func main() {
 	authHandler := auth.NewHandler(auth.NewSQLUsers(db), sessions, renderer, cfg.SessionCookieSecure, cfgSession, logger, flashManager)
 
 	mux := http.NewServeMux()
-	guards := access.NewGuards(access.GuardsConfig{Checker: access.NewChecker(db)})
+	checker := access.NewChecker(db)
+	guards := access.NewGuards(access.GuardsConfig{Checker: checker})
 	adminHandler := admin.NewHandler(admin.NewStore(db), sessions, nil, logger)
 	adminHandler.Routes(mux, authHandler.Authenticate, guards.Admin)
+
+	// Database connection passwords are encrypted at rest. Refuse startup rather
+	// than silently store or interpret credentials without the configured key.
+	encryptionKey, err := connections.LoadEncryptionKey()
+	if err != nil {
+		logger.Error("invalid database encryption configuration; check DB_ENCRYPTION_KEY")
+		os.Exit(1)
+	}
+	connectionRepo, err := connections.NewSQLRepository(db, encryptionKey)
+	if err != nil {
+		logger.Error("cannot initialize database connection repository")
+		os.Exit(1)
+	}
+	poolManager := connections.NewPoolManager(connectionRepo, "")
+	defer func() {
+		if err := poolManager.CloseAll(); err != nil {
+			logger.Error("failed to close database connection pools")
+		}
+	}()
+
+	connectionHandler := connections.NewHandler(connectionRepo, poolManager, admin.NewTemplateRenderer("web/templates"), guards)
+	connectionHandler.RegisterRoutesWithAuth(mux, authHandler.Authenticate)
+
+	introspectors := map[contract.Engine]contract.Introspector{
+		contract.EnginePostgres: postgres.NewIntrospector(),
+		contract.EngineMySQL:    mysql.NewIntrospector(),
+		contract.EngineMariaDB:  mysql.NewIntrospector(),
+	}
+	viewerHandler := viewer.NewMultiEngineHandler(poolManager, introspectors, checker, viewer.NewHTMLRenderer("web/templates"), guards)
+	viewerHandler.RegisterRoutesWithAuth(mux, authHandler.Authenticate)
+
+	migrationHandler := migration.NewHandler(
+		migration.NewService(migration.NewSQLRepository(db), poolManager),
+		migration.NewHTMLRenderer("web/templates"),
+		guards,
+	)
+	migrationHandler.RegisterRoutesWithAuth(mux, authHandler.Authenticate)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)

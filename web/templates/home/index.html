@@ -2,7 +2,11 @@
 <section class="panel">
   <p class="eyebrow">Fondasi aplikasi</p>
   <h1>Halo, {{.Principal.Username}}.</h1>
-  <p>Autentikasi dan session berhasil. Modul access control, koneksi database, viewer, dan migration belum dipasang pada scaffold P1 ini.</p>
-  {{if .Principal.IsPlatformAdmin}}<p class="muted">Akun ini memiliki flag Platform Admin. Hak akses ke database tetap harus ditentukan melalui group.</p>{{end}}
+  <p>Autentikasi dan session berhasil. Pilih database yang dapat diakses untuk melihat schema, data tabel, dan riwayat migration.</p>
+  <p><a href="/databases">Pilih database</a></p>
+  {{if .Principal.IsPlatformAdmin}}
+    <p class="muted">Akun ini memiliki flag Platform Admin. Hak akses ke database tetap ditentukan melalui group.</p>
+    <p><a href="/admin/connections">Kelola koneksi database</a> · <a href="/admin/users">Kelola pengguna</a> · <a href="/admin/groups">Kelola group</a> · <a href="/admin/access">Kelola akses</a></p>
+  {{end}}
 </section>
 {{end}}

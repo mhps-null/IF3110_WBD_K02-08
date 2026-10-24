@@ -67,21 +67,36 @@ func (h *Handler) introspectorFor(engine contract.Engine) (contract.Introspector
 	return nil, fmt.Errorf("no introspector configured for engine: %s", engine)
 }
 
-// RegisterRoutes binds database viewer endpoints to the HTTP router with authorization guards.
+// RegisterRoutes binds database viewer endpoints with authorization guards.
+// It preserves the current unit-test interface; production wiring should use
+// RegisterRoutesWithAuth so /databases receives an authenticated principal.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	h.RegisterRoutesWithAuth(mux, func(next http.Handler) http.Handler { return next })
+}
+
+// RegisterRoutesWithAuth authenticates every viewer route and checks database access
+// before schema/data handlers execute.
+func (h *Handler) RegisterRoutesWithAuth(mux *http.ServeMux, authenticate func(http.Handler) http.Handler) {
+	if authenticate == nil {
+		authenticate = func(http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "Access denied: authentication middleware not configured", http.StatusForbidden)
+			})
+		}
+	}
 	viewDB := h.guards.ViewDB
 	if viewDB == nil {
 		viewDB = func(http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				http.Error(w, "Access denied: security guard not configured", http.StatusForbidden)
 			})
 		}
 	}
 
-	mux.HandleFunc("GET /databases", h.ListDatabases)
-	mux.Handle("GET /databases/{id}/schema", viewDB(http.HandlerFunc(h.DatabaseSchema)))
-	mux.Handle("GET /databases/{id}/tables/{table}", viewDB(http.HandlerFunc(h.TableDetail)))
-	mux.Handle("GET /databases/{id}/tables/{table}/data", viewDB(http.HandlerFunc(h.TableData)))
+	mux.Handle("GET /databases", authenticate(http.HandlerFunc(h.ListDatabases)))
+	mux.Handle("GET /databases/{id}/schema", authenticate(viewDB(http.HandlerFunc(h.DatabaseSchema))))
+	mux.Handle("GET /databases/{id}/tables/{table}", authenticate(viewDB(http.HandlerFunc(h.TableDetail))))
+	mux.Handle("GET /databases/{id}/tables/{table}/data", authenticate(viewDB(http.HandlerFunc(h.TableData))))
 }
 
 func (h *Handler) ListDatabases(w http.ResponseWriter, r *http.Request) {

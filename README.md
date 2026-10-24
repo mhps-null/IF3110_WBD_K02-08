@@ -1,6 +1,6 @@
-# IF3110 Milestone 1 — P1 Foundation, Authentication, and Session
+# IF3110 Milestone 1 — Integrated Database Management Platform
 
-Dokumentasi implementasi P1 untuk fondasi aplikasi Database Management Platform. Cakupan P1 meliputi konfigurasi aplikasi, seed Platform Admin, autentikasi, session berbasis PostgreSQL, proteksi CSRF, template HTML, flash message, logging aman, dan security headers.
+Dokumentasi setup untuk aplikasi terintegrasi: fondasi autentikasi/session, access control, pengelolaan koneksi database, schema/data viewer, dan migration.
 
 ## Prasyarat
 
@@ -21,6 +21,7 @@ Edit `.env` dan isi setidaknya:
 
 - `DATABASE_URL`: DSN PostgreSQL metadata aplikasi.
 - `SESSION_SECRET`: secret acak minimal 32 karakter.
+- `DB_ENCRYPTION_KEY`: kunci AES 32 byte untuk mengenkripsi password koneksi database.
 - `SEED_ADMIN_USERNAME`: username Platform Admin awal.
 - `SEED_ADMIN_PASSWORD`: password awal minimal 14 karakter dan bukan password placeholder.
 
@@ -32,7 +33,13 @@ Buat secret dengan:
 openssl rand -hex 32
 ```
 
-Masukkan hasilnya sebagai nilai `SESSION_SECRET` di `.env`. Jangan commit `.env` atau membagikan isi konfigurasi yang mengandung kredensial.
+Masukkan hasil perintah tersebut sebagai nilai `SESSION_SECRET` di `.env`. Untuk `DB_ENCRYPTION_KEY`, hasilkan nilai Base64 32 byte dengan:
+
+```bash
+openssl rand -base64 32
+```
+
+Simpan nilai `DB_ENCRYPTION_KEY` secara aman dan pertahankan nilainya selama password koneksi tersimpan di metadata; mengganti atau kehilangan kunci dapat membuat password koneksi lama tidak dapat didekripsi. Jangan commit `.env` atau membagikan isi konfigurasi yang mengandung kredensial.
 
 Muat environment variables ke shell:
 
@@ -68,15 +75,25 @@ Seed membuat Platform Admin awal jika username belum ada. Jika username tersebut
 
 Server menggunakan alamat dari `ADDR`, dengan nilai default `:8080`. Buka `http://localhost:8080` untuk mengakses aplikasi lokal.
 
-Endpoint dasar yang tersedia pada implementasi P1:
+Route utama yang terdaftar pada server:
 
 | Method | Route | Fungsi |
 |---|---|---|
 | `GET` | `/healthz` | Health check |
-| `GET` | `/login` | Halaman login |
-| `POST` | `/login` | Memproses login dengan CSRF |
+| `GET`, `POST` | `/login` | Halaman dan proses login |
 | `GET` | `/` | Beranda dengan autentikasi |
 | `POST` | `/logout` | Logout dengan autentikasi dan CSRF |
+| `GET`, `POST` | `/admin/connections` | Daftar dan tambah profil koneksi (Platform Admin) |
+| `GET` | `/databases` | Daftar database yang dapat diakses pengguna |
+| `GET` | `/databases/{id}/schema` | Lihat schema database |
+| `GET` | `/databases/{id}/tables/{table}` | Lihat detail kolom tabel |
+| `GET` | `/databases/{id}/tables/{table}/data` | Lihat data tabel secara paginasi |
+| `GET`, `POST` | `/databases/{id}/migrations` | Riwayat dan pembuatan draft migration |
+| `GET` | `/databases/{id}/migrations/{mid}` | Detail migration |
+| `POST` | `/databases/{id}/migrations/{mid}/execute` | Eksekusi draft migration |
+| `POST` | `/databases/{id}/migrations/{mid}/explain` | Analisis execution plan |
+
+Semua route berbasis database tetap melewati autentikasi dan guard akses database.
 
 ## 4. Verifikasi unit test dan build
 
