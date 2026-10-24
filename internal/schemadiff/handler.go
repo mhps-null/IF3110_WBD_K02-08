@@ -146,7 +146,7 @@ func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Open databases only after verifying the principal can view both.
-	sourceDB, engine, err := h.targetDB.Open(r.Context(), sourceID)
+	sourceDB, sourceEngine, err := h.targetDB.Open(r.Context(), sourceID)
 	if err != nil {
 		h.logger.Error("schemadiff: open source db failed", "id", sourceID)
 		http.Error(w, "Gagal membuka database sumber", http.StatusInternalServerError)
@@ -154,13 +154,30 @@ func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	defer sourceDB.Close()
 
-	targetDBConn, _, err := h.targetDB.Open(r.Context(), targetID)
+	targetDBConn, targetEngine, err := h.targetDB.Open(r.Context(), targetID)
 	if err != nil {
 		h.logger.Error("schemadiff: open target db failed", "id", targetID)
 		http.Error(w, "Gagal membuka database target", http.StatusInternalServerError)
 		return
 	}
 	defer targetDBConn.Close()
+
+	// The generated migration is submitted against the source database, so the
+	// target snapshot must use the same SQL dialect. Cross-engine translation is
+	// not implemented and must fail closed rather than emit unsafe SQL.
+	if sourceEngine != targetEngine {
+		h.logger.Warn("schemadiff: cross-engine diff is not supported",
+			"source_engine", sourceEngine,
+			"target_engine", targetEngine,
+		)
+		http.Error(w, "Schema diff lintas-DBMS belum didukung; pilih database dengan DBMS yang sama.", http.StatusUnprocessableEntity)
+		return
+	}
+	if !supportedDiffEngine(sourceEngine) {
+		h.logger.Warn("schemadiff: unsupported database engine", "engine", sourceEngine)
+		http.Error(w, "DBMS tidak didukung untuk schema diff.", http.StatusUnprocessableEntity)
+		return
+	}
 
 	// ambil Snapshot
 	snapA, err := h.introspector.Snapshot(r.Context(), sourceDB)
@@ -179,7 +196,7 @@ func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
 
 	// proses Diff & Generate SQL
 	changes := Diff(snapA, snapB)
-	sql := GenerateSQL(changes, engine)
+	sql := GenerateSQL(changes, sourceEngine)
 
 	var formatted []string
 	for _, c := range changes {
@@ -193,7 +210,7 @@ func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
 			TargetDBName: targetAccess.Name,
 			Changes:      formatted,
 			GeneratedSQL: sql,
-			Engine:       string(engine),
+			Engine:       string(sourceEngine),
 		},
 	})
 }
@@ -221,6 +238,15 @@ func (h *Handler) requireViewAccess(w http.ResponseWriter, r *http.Request, user
 		return false
 	}
 	return true
+}
+
+func supportedDiffEngine(engine contract.Engine) bool {
+	switch engine {
+	case contract.EnginePostgres, contract.EngineMySQL, contract.EngineMariaDB:
+		return true
+	default:
+		return false
+	}
 }
 
 func findAccessibleDB(databases []contract.AccessibleDB, dbID int64) (contract.AccessibleDB, bool) {
