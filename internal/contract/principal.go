@@ -58,5 +58,6 @@ type PageData struct {
 	Principal Principal
 	CSRFToken string
 	Flash     string
+	FlashKind string // success, error, or info; empty defaults to info.
 	Data      any
 }

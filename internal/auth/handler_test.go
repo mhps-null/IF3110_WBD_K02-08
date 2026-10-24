@@ -33,6 +33,7 @@ func (f fakeUserRepo) FindByID(_ context.Context, id int64) (User, error) {
 type fakeSessions struct {
 	valid     map[string]contract.SessionInfo
 	rotateErr error
+	loadErr   error
 }
 
 func (f *fakeSessions) Create(_ context.Context, id int64, now time.Time) (string, contract.SessionInfo, error) {
@@ -41,6 +42,9 @@ func (f *fakeSessions) Create(_ context.Context, id int64, now time.Time) (strin
 	return "test-session", info, nil
 }
 func (f *fakeSessions) Load(_ context.Context, id string, _ time.Time) (contract.SessionInfo, error) {
+	if f.loadErr != nil {
+		return contract.SessionInfo{}, f.loadErr
+	}
 	info, ok := f.valid[id]
 	if !ok {
 		return info, session.ErrInvalid
@@ -73,11 +77,36 @@ func (f *fakeSessions) RevokeAllForUser(_ context.Context, user int64) error {
 	return nil
 }
 
+type failingIDUserRepo struct{ err error }
+
+func (f failingIDUserRepo) FindByUsername(context.Context, string) (User, error) {
+	return User{}, ErrUserNotFound
+}
+func (f failingIDUserRepo) FindByID(context.Context, int64) (User, error) {
+	return User{}, f.err
+}
+
 type fakeRenderer struct{}
 
 func (fakeRenderer) Render(w http.ResponseWriter, _ string, data contract.PageData) error {
 	_, err := io.WriteString(w, data.Flash)
 	return err
+}
+
+type fakeFlashStore struct {
+	message string
+	kind    string
+}
+
+func (f *fakeFlashStore) Set(_ http.ResponseWriter, kind, message string) {
+	f.kind = kind
+	f.message = message
+}
+
+func (f *fakeFlashStore) Consume(_ http.ResponseWriter, _ *http.Request) (message, kind string) {
+	message, kind = f.message, f.kind
+	f.message, f.kind = "", ""
+	return message, kind
 }
 
 func loginRequest(username, plain string) *http.Request {
@@ -258,5 +287,93 @@ func TestAuthenticateRejectsPreviousTokenWithStalePrivilegeVersion(t *testing.T)
 	}
 	if nextCalled {
 		t.Fatal("protected handler ran with a stale privilege snapshot")
+	}
+}
+
+func TestLoginAndLogoutFlashMessages(t *testing.T) {
+	hash, err := password.Hash("valid-test-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := fakeUserRepo{User{ID: 1, Username: "alice", PasswordHash: hash, IsActive: true}}
+	sessions := &fakeSessions{valid: map[string]contract.SessionInfo{}}
+	flash := &fakeFlashStore{}
+	h := NewHandler(users, sessions, fakeRenderer{}, false, session.DefaultConfig(), nil, flash)
+
+	loginRec := httptest.NewRecorder()
+	h.Login(loginRec, loginRequest("alice", "valid-test-password"))
+	if loginRec.Code != http.StatusSeeOther || flash.kind != "success" || flash.message != "Berhasil masuk." {
+		t.Fatalf("login redirect/flash = (%d, %q, %q)", loginRec.Code, flash.kind, flash.message)
+	}
+
+	homeReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	homeReq = homeReq.WithContext(contract.WithPrincipal(homeReq.Context(), contract.Principal{UserID: 1, Username: "alice"}))
+	homeRec := httptest.NewRecorder()
+	h.RenderHome(homeRec, homeReq)
+	if homeRec.Body.String() != "Berhasil masuk." || flash.message != "" {
+		t.Fatalf("home flash not consumed/rendered: body=%q remaining=%q", homeRec.Body.String(), flash.message)
+	}
+
+	logoutReq := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	logoutReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "test-session"})
+	logoutRec := httptest.NewRecorder()
+	h.Logout(logoutRec, logoutReq)
+	if logoutRec.Code != http.StatusSeeOther || flash.kind != "success" || flash.message != "Berhasil keluar." {
+		t.Fatalf("logout redirect/flash = (%d, %q, %q)", logoutRec.Code, flash.kind, flash.message)
+	}
+
+	loginPageReq := httptest.NewRequest(http.MethodGet, "/login", nil)
+	loginPageRec := httptest.NewRecorder()
+	h.LoginPage(loginPageRec, loginPageReq)
+	if loginPageRec.Body.String() != "Berhasil keluar." || flash.message != "" {
+		t.Fatalf("login page flash not consumed/rendered: body=%q remaining=%q", loginPageRec.Body.String(), flash.message)
+	}
+}
+
+func TestAuthenticateTransientStoreErrorPreservesSessionCookie(t *testing.T) {
+	sessions := &fakeSessions{valid: map[string]contract.SessionInfo{}}
+	token, _, err := sessions.Create(context.Background(), 1, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions.loadErr = context.DeadlineExceeded
+	h := NewHandler(fakeUserRepo{User{ID: 1, Username: "alice", IsActive: true}}, sessions, fakeRenderer{}, false, session.DefaultConfig(), nil)
+	nextCalled := false
+	protected := h.Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { nextCalled = true }))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	protected.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable || nextCalled {
+		t.Fatalf("status=%d nextCalled=%v", rec.Code, nextCalled)
+	}
+	if _, ok := sessions.valid[token]; !ok {
+		t.Fatal("transient store error revoked the session")
+	}
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == sessionCookieName && cookie.MaxAge == -1 {
+			t.Fatal("transient store error cleared the session cookie")
+		}
+	}
+}
+
+func TestAuthenticateTransientUserLookupErrorPreservesSession(t *testing.T) {
+	sessions := &fakeSessions{valid: map[string]contract.SessionInfo{}}
+	token, _, err := sessions.Create(context.Background(), 1, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(failingIDUserRepo{err: context.DeadlineExceeded}, sessions, fakeRenderer{}, false, session.DefaultConfig(), nil)
+	nextCalled := false
+	protected := h.Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { nextCalled = true }))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	protected.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable || nextCalled {
+		t.Fatalf("status=%d nextCalled=%v", rec.Code, nextCalled)
+	}
+	if _, ok := sessions.valid[token]; !ok {
+		t.Fatal("transient user lookup error revoked the session")
 	}
 }

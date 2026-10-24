@@ -52,7 +52,12 @@ func main() {
 	}
 	cfgSession := session.DefaultConfig()
 	sessions := session.NewSQLStore(db, cfgSession)
-	authHandler := auth.NewHandler(auth.NewSQLUsers(db), sessions, renderer, cfg.SessionCookieSecure, cfgSession, logger)
+	flashManager, err := web.NewFlashManager(cfg.SessionSecret, cfg.SessionCookieSecure)
+	if err != nil {
+		logger.Error("cannot initialize flash message manager")
+		os.Exit(1)
+	}
+	authHandler := auth.NewHandler(auth.NewSQLUsers(db), sessions, renderer, cfg.SessionCookieSecure, cfgSession, logger, flashManager)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
