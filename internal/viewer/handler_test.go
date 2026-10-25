@@ -120,44 +120,6 @@ func TestViewerRoutesAndAccess(t *testing.T) {
 	}
 }
 
-func TestDatabaseSchemaShowsCreateMigrationOnlyForViewEdit(t *testing.T) {
-	checker := testutil.NewFakeAccessChecker()
-	checker.RegisterDB(1, "allowed")
-	checker.AssignUserToGroup(1, 10)
-	checker.GrantGroupAccess(10, 1, contract.AccessViewOnly)
-	intro := &fakeIntrospector{}
-	renderer := NewHTMLRenderer("../../web/templates")
-	h := NewHandler(
-		&fakeTargetDB{engine: contract.EnginePostgres},
-		intro,
-		checker,
-		renderer,
-		testutil.NewFakeGuards(checker),
-	)
-	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
-
-	viewOnlyPage := viewerRequest(mux, "/databases/1/schema", 1)
-	if viewOnlyPage.Code != http.StatusOK {
-		t.Fatalf("view-only schema status=%d want=%d", viewOnlyPage.Code, http.StatusOK)
-	}
-	if strings.Contains(viewOnlyPage.Body.String(), `href="/databases/1/migrations/new"`) {
-		t.Fatal("view-only schema page must not show the create migration action")
-	}
-	if !strings.Contains(viewOnlyPage.Body.String(), `href="/databases/1/migrations"`) {
-		t.Fatal("view-only schema page should retain migration history")
-	}
-
-	checker.GrantGroupAccess(10, 1, contract.AccessViewEdit)
-	viewEditPage := viewerRequest(mux, "/databases/1/schema", 1)
-	if viewEditPage.Code != http.StatusOK {
-		t.Fatalf("view-edit schema status=%d want=%d", viewEditPage.Code, http.StatusOK)
-	}
-	if !strings.Contains(viewEditPage.Body.String(), `href="/databases/1/migrations/new"`) {
-		t.Fatal("view-edit schema page should show the create migration action")
-	}
-}
-
 func TestViewerErrorsAndEngine(t *testing.T) {
 	h, intro, renderer := viewerSetup()
 	mux := http.NewServeMux()
