@@ -59,19 +59,13 @@ func TestSetAccess_WebPayloadLimitExceeded(t *testing.T) {
 	}
 }
 
-func TestAccessMatrixTemplate_RendersSequentialFlow(t *testing.T) {
+func TestAccessMatrixTemplate_RendersAllRequiredFields(t *testing.T) {
 	output := httptest.NewRecorder()
 	renderer := NewTemplateRenderer("../../web/templates")
 	err := renderer.Render(output, "admin/access.html", contract.PageData{
 		Data: matrixPageData{
-			Databases:        []Database{{ID: 10, Name: "AppDB"}},
-			SelectedDatabase: 10,
-			SelectedDBName:   "AppDB",
-			Groups:           []Group{{ID: 2, Name: "Developers"}},
-			SelectedGroupID:  2,
-			SelectedGroup:    "Developers",
-			SelectedLevel:    1,
-			GroupSelected:    true,
+			Databases: []Database{{ID: 10, Name: "AppDB"}},
+			Groups:    []Group{{ID: 2, Name: "Developers"}},
 			AccessEntries: []accessMatrixEntry{
 				{DatabaseName: "AppDB", GroupName: "Developers", Level: 1},
 			},
@@ -82,18 +76,16 @@ func TestAccessMatrixTemplate_RendersSequentialFlow(t *testing.T) {
 	}
 
 	html := output.Body.String()
-	databaseStep := strings.Index(html, "1. Database")
-	groupStep := strings.Index(html, "2. Group")
-	levelStep := strings.Index(html, "3. Level akses")
-	if databaseStep < 0 || groupStep <= databaseStep || levelStep <= groupStep {
-		t.Fatalf("expected database, group, then access-level steps in order")
-	}
-	if !strings.Contains(html, `name="db_id" value="10"`) ||
-		!strings.Contains(html, `name="group_id"`) ||
-		!strings.Contains(html, `<option value="1" selected>View Only</option>`) ||
+	if !strings.Contains(html, `<form method="post" action="/admin/access"`) ||
+		!strings.Contains(html, `<select id="database" name="db_id" required>`) ||
+		!strings.Contains(html, `<select id="group" name="group_id" required>`) ||
+		!strings.Contains(html, `<select id="level" name="level" required>`) ||
+		!strings.Contains(html, `<option value="">Pilih database</option>`) ||
+		!strings.Contains(html, `<option value="">Pilih group</option>`) ||
+		!strings.Contains(html, `<option value="">Pilih level akses</option>`) ||
 		!strings.Contains(html, "Daftar matriks akses") ||
 		!strings.Contains(html, "Developers") {
-		t.Fatal("expected database/group selectors, current access level, and saved access list")
+		t.Fatal("expected a single form with all required dropdowns and the saved access list")
 	}
 }
 

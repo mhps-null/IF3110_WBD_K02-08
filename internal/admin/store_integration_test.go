@@ -354,10 +354,10 @@ func TestAccessFlow_SelectDatabaseGroupAndLevel(t *testing.T) {
 
 	beforeSave := getSelectedGroup()
 	if beforeSave.Code != http.StatusOK ||
-		!strings.Contains(beforeSave.Body.String(), "1. Pilih database") ||
-		!strings.Contains(beforeSave.Body.String(), "2. Pilih group") ||
-		!strings.Contains(beforeSave.Body.String(), "3. Pilih level akses") {
-		t.Fatalf("expected full selected database/group flow, got status %d", beforeSave.Code)
+		!strings.Contains(beforeSave.Body.String(), `<select id="database" name="db_id" required>`) ||
+		!strings.Contains(beforeSave.Body.String(), `<select id="group" name="group_id" required>`) ||
+		!strings.Contains(beforeSave.Body.String(), `<select id="level" name="level" required>`) {
+		t.Fatalf("expected all required access fields immediately, got status %d", beforeSave.Code)
 	}
 
 	form := url.Values{

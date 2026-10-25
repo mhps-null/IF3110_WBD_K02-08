@@ -1,71 +1,57 @@
 {{define "content"}}
 <header class="page-header">
-  <div class="page-header-main"><p class="eyebrow">Administrasi platform</p><h1>Matriks akses</h1><p class="page-description">Atur akses database untuk setiap group dan lihat matriks akses yang sudah tersimpan.</p></div>
+  <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/">Beranda</a><span aria-hidden="true">/</span><span aria-current="page">Matriks Akses</span>
+    </nav>
+    <p class="eyebrow">Administrasi platform</p>
+    <h1>Matriks akses</h1>
+    <p class="page-description">Atur akses database untuk setiap group dan lihat matriks akses yang sudah tersimpan.</p>
+  </div>
 </header>
-<nav class="admin-nav" aria-label="Navigasi administrasi"><a href="/admin/users">Pengguna</a><a href="/admin/groups">Group</a><a href="/admin/access" aria-current="page">Matriks akses</a></nav>
 
 <div class="content-grid">
   <section class="panel">
-    <div class="panel-header"><div><h2>Tambah matriks akses</h2><p>Pilih database, group, lalu level akses.</p></div></div>
-    {{if .Data.Databases}}
-    <div class="stack">
-      <form method="get" action="/admin/access" class="stack">
-        <div class="form-field">
-          <label for="database">1. Database</label>
-          <select id="database" name="db_id" required>
-            <option value="">Pilih database</option>
-            {{range .Data.Databases}}
-            <option value="{{.ID}}" {{if eq .ID $.Data.SelectedDatabase}}selected{{end}}>{{.Name}}</option>
-            {{end}}
-          </select>
-        </div>
-        <button type="submit" class="primary">Pilih database</button>
-      </form>
-
-      {{if .Data.SelectedDatabase}}
-        {{if .Data.Groups}}
-        <form method="get" action="/admin/access" class="stack">
-          <input type="hidden" name="db_id" value="{{.Data.SelectedDatabase}}">
-          <div class="form-field">
-            <label for="group">2. Group</label>
-            <select id="group" name="group_id" required>
-              <option value="">Pilih group</option>
-              {{range .Data.Groups}}
-              <option value="{{.ID}}" {{if eq .ID $.Data.SelectedGroupID}}selected{{end}}>{{.Name}}</option>
-              {{end}}
-            </select>
-          </div>
-          <button type="submit" class="primary">Pilih group</button>
-        </form>
-        {{else}}
-        <div class="notice">Belum ada group. <a href="/admin/groups">Buat group terlebih dahulu.</a></div>
-        {{end}}
-
-        {{if .Data.GroupSelected}}
-        <form method="post" action="/admin/access" class="stack">
-          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-          <input type="hidden" name="db_id" value="{{.Data.SelectedDatabase}}">
-          <input type="hidden" name="group_id" value="{{.Data.SelectedGroupID}}">
-          <div class="form-field">
-            <label for="level">3. Level akses</label>
-            <select id="level" name="level" required>
-              <option value="0" {{if eq .Data.SelectedLevel 0}}selected{{end}}>None</option>
-              <option value="1" {{if eq .Data.SelectedLevel 1}}selected{{end}}>View Only</option>
-              <option value="2" {{if eq .Data.SelectedLevel 2}}selected{{end}}>View + Edit</option>
-            </select>
-          </div>
-          <button type="submit" class="primary">Simpan akses</button>
-        </form>
-        {{end}}
-      {{end}}
-    </div>
-    {{else}}
-    <div class="empty-state"><h3>Belum ada database</h3><p>Tambahkan koneksi database sebelum mengatur matriks akses.</p><a class="button primary" href="/admin/connections">Tambah koneksi</a></div>
-    {{end}}
+    <div class="panel-header"><div><h2>Tambah matriks akses</h2><p>Lengkapi database, group, dan level akses sebelum menyimpan.</p></div></div>
+    <form method="post" action="/admin/access" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <div class="form-field">
+        <label for="database">Database</label>
+        <select id="database" name="db_id" required>
+          <option value="">Pilih database</option>
+          {{range .Data.Databases}}
+          <option value="{{.ID}}" {{if eq .ID $.Data.SelectedDatabase}}selected{{end}}>{{.Name}}</option>
+          {{end}}
+        </select>
+        {{if not .Data.Databases}}<small class="field-hint">Belum ada database. <a href="/admin/connections">Tambahkan koneksi database</a> terlebih dahulu.</small>{{end}}
+      </div>
+      <div class="form-field">
+        <label for="group">Group</label>
+        <select id="group" name="group_id" required>
+          <option value="">Pilih group</option>
+          {{range .Data.Groups}}
+          <option value="{{.ID}}" {{if eq .ID $.Data.SelectedGroupID}}selected{{end}}>{{.Name}}</option>
+          {{end}}
+        </select>
+        {{if not .Data.Groups}}<small class="field-hint">Belum ada group. <a href="/admin/groups">Buat group terlebih dahulu</a>.</small>{{end}}
+      </div>
+      <div class="form-field">
+        <label for="level">Level akses</label>
+        <select id="level" name="level" required>
+          <option value="">Pilih level akses</option>
+          <option value="1" {{if and .Data.GroupSelected (eq .Data.SelectedLevel 1)}}selected{{end}}>View Only</option>
+          <option value="2" {{if and .Data.GroupSelected (eq .Data.SelectedLevel 2)}}selected{{end}}>View + Edit</option>
+        </select>
+      </div>
+      <button type="submit" class="primary">Simpan akses</button>
+    </form>
   </section>
 
   <section class="panel">
-    <div class="panel-header"><div><h2>Daftar matriks akses</h2><p>Daftar group yang sudah memiliki akses ke database.</p></div></div>
+    <div class="panel-header">
+      <div><h2>Daftar matriks akses</h2><p>Daftar group yang sudah memiliki akses ke database.</p></div>
+      <span class="badge badge-neutral">{{len .Data.AccessEntries}} akses</span>
+    </div>
     {{if .Data.AccessEntries}}
     <div class="table-wrapper">
             <table class="data-table">
