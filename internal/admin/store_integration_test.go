@@ -16,10 +16,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/example/if3110-milestone1/internal/access"
-	"github.com/example/if3110-milestone1/internal/connections"
-	"github.com/example/if3110-milestone1/internal/contract"
-	"github.com/example/if3110-milestone1/internal/session"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/access"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/connections"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/session"
 )
 
 const schemaPath = "../../migrations_meta/001_initial_schema.sql"
@@ -146,6 +146,38 @@ func TestStore_Groups(t *testing.T) {
 
 	t.Run("duplicate rejected", func(t *testing.T) {
 		_, err := s.CreateGroup(ctx, "dev", "again")
+		if !errorsIs(err, ErrDuplicateGroupName) {
+			t.Fatalf("want ErrDuplicateGroupName, got %v", err)
+		}
+	})
+
+	t.Run("update", func(t *testing.T) {
+		id, err := s.CreateGroup(ctx, "qa", "qa team")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.UpdateGroup(ctx, id, "qa-lead", "qa leadership"); err != nil {
+			t.Fatal(err)
+		}
+		g, err := s.GetGroup(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g.Name != "qa-lead" || g.Description != "qa leadership" {
+			t.Fatalf("unexpected group: %+v", g)
+		}
+	})
+
+	t.Run("update duplicate rejected", func(t *testing.T) {
+		_, err := s.CreateGroup(ctx, "marketing", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		g2, err := s.CreateGroup(ctx, "sales", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = s.UpdateGroup(ctx, g2, "marketing", "try duplicate")
 		if !errorsIs(err, ErrDuplicateGroupName) {
 			t.Fatalf("want ErrDuplicateGroupName, got %v", err)
 		}

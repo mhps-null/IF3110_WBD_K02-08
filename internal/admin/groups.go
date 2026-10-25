@@ -3,9 +3,10 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 type groupsPageData struct {
@@ -13,8 +14,8 @@ type groupsPageData struct {
 }
 
 type groupDetailPageData struct {
-	Group Group
-	Members []User
+	Group     Group
+	Members   []User
 	Available []User // user yg blm jadi anggota
 }
 
@@ -30,9 +31,9 @@ func (h *Handler) ListGroups(w http.ResponseWriter, r *http.Request) {
 		Flash: flashFor(r, map[string]string{
 			"created": "Group berhasil dibuat.",
 			"deleted": "Group berhasil dihapus.",
-			"member": "Anggota berhasil ditambahkan.",
+			"member":  "Anggota berhasil ditambahkan.",
 			"removed": "Anggota berhasil dihapus.",
-			"error": "Operasi gagal. Silakan coba lagi.",
+			"error":   "Operasi gagal. Silakan coba lagi.",
 		}),
 		Data: groupsPageData{Groups: groups},
 	})
@@ -61,6 +62,43 @@ func (h *Handler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	redirect(w, r, "/admin/groups?flash=created")
+}
+
+func (h *Handler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	if err := r.ParseForm(); err != nil {
+		redirect(w, r, "/admin/groups/"+strconv.FormatInt(id, 10)+"?flash=error")
+		return
+	}
+
+	name := strings.TrimSpace(r.FormValue("name"))
+	description := strings.TrimSpace(r.FormValue("description"))
+	if name == "" || len(name) > 100 {
+		redirect(w, r, "/admin/groups/"+strconv.FormatInt(id, 10)+"?flash=error")
+		return
+	}
+
+	if err := h.store.UpdateGroup(r.Context(), id, name, description); err != nil {
+		if errors.Is(err, ErrGroupNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		if errors.Is(err, ErrDuplicateGroupName) {
+			redirect(w, r, "/admin/groups/"+strconv.FormatInt(id, 10)+"?flash=duplicate")
+			return
+		}
+		h.logger.Error("update group failed", "error", err)
+		redirect(w, r, "/admin/groups/"+strconv.FormatInt(id, 10)+"?flash=error")
+		return
+	}
+
+	redirect(w, r, "/admin/groups/"+strconv.FormatInt(id, 10)+"?flash=updated")
 }
 
 func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
@@ -131,9 +169,11 @@ func (h *Handler) ShowGroup(w http.ResponseWriter, r *http.Request) {
 
 	h.render(w, r, "admin/group_detail.html", contract.PageData{
 		Flash: flashFor(r, map[string]string{
-			"member": "Anggota berhasil ditambahkan.",
-			"removed": "Anggota berhasil dihapus.",
-			"error": "Operasi gagal.",
+			"updated":   "Group berhasil diperbarui.",
+			"duplicate": "Nama group sudah digunakan.",
+			"member":    "Anggota berhasil ditambahkan.",
+			"removed":   "Anggota berhasil dihapus.",
+			"error":     "Operasi gagal.",
 		}),
 		Data: groupDetailPageData{Group: g, Members: members, Available: available},
 	})

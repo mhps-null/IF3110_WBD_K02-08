@@ -10,6 +10,16 @@
 <nav class="admin-nav" aria-label="Navigasi administrasi"><a href="/admin/users">Pengguna</a><a href="/admin/groups" aria-current="page">Group</a><a href="/admin/access">Matriks akses</a></nav>
 
 <section class="panel">
+  <div class="panel-header"><div><h2>Ubah group</h2><p>Perbarui nama dan deskripsi group ini.</p></div></div>
+  <form method="post" action="/admin/groups/{{.Data.Group.ID}}/edit" class="stack">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="form-field"><label for="name">Nama group</label><input id="name" name="name" type="text" required maxlength="100" autocomplete="off" value="{{.Data.Group.Name}}"></div>
+    <div class="form-field"><label for="description">Deskripsi</label><input id="description" name="description" type="text" maxlength="255" value="{{.Data.Group.Description}}" placeholder="Tujuan dan cakupan group"></div>
+    <button type="submit" class="primary">Simpan perubahan</button>
+  </form>
+</section>
+
+<section class="panel mt-2">
   <div class="panel-header"><div><h2>Anggota group</h2><p>{{len .Data.Members}} pengguna menjadi anggota group ini.</p></div></div>
   {{if .Data.Members}}
   <div class="table-wrapper"><table class="data-table">

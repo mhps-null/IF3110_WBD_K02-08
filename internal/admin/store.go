@@ -5,21 +5,22 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var (
-	ErrUserNotFound = errors.New("user tidak ditemukan")
+	ErrUserNotFound      = errors.New("user tidak ditemukan")
 	ErrDuplicateUsername = errors.New("username sudah dipakai")
 )
 
 type User struct {
-	ID int64
-	Username string
-	IsAdmin bool
-	IsActive bool
+	ID        int64
+	Username  string
+	IsAdmin   bool
+	IsActive  bool
 	CreatedAt time.Time
 }
 
@@ -131,29 +132,29 @@ func isUniqueViolation(err error) bool {
 
 // Errors
 var (
-	ErrGroupNotFound = errors.New("group tidak ditemukan")
+	ErrGroupNotFound      = errors.New("group tidak ditemukan")
 	ErrDuplicateGroupName = errors.New("nama group sudah dipakai")
 )
 
-// Tipe 
+// Tipe
 type Group struct {
-	ID int64
-	Name string
+	ID          int64
+	Name        string
 	Description string
 }
 
 type Database struct {
-	ID int64
+	ID   int64
 	Name string
 }
 
 type GroupAccess struct {
 	GroupID int64
-	DBID int64
-	Level int // 1 = view only, 2 = view + edit
+	DBID    int64
+	Level   int // 1 = view only, 2 = view + edit
 }
 
-// Groups 
+// Groups
 func (s *Store) ListGroups(ctx context.Context) ([]Group, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, description FROM groups ORDER BY name`)
@@ -208,6 +209,33 @@ func (s *Store) GetGroup(ctx context.Context, id int64) (Group, error) {
 	}
 
 	return g, nil
+}
+
+func (s *Store) UpdateGroup(ctx context.Context, id int64, name, description string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 100 {
+		return errors.New("invalid group name")
+	}
+
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE groups SET name = $1, description = $2 WHERE id = $3`,
+		name, description, id)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicateGroupName
+		}
+		return fmt.Errorf("update group: %w", err)
+	}
+
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update group rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrGroupNotFound
+	}
+
+	return nil
 }
 
 // membership dan akses ikut kehapus lewat ON DELETE CASCADE.
@@ -321,7 +349,7 @@ func (s *Store) RemoveMember(ctx context.Context, groupID, userID int64) error {
 	return tx.Commit()
 }
 
-// Databases (baca dari db_connections) 
+// Databases (baca dari db_connections)
 
 // return id + name dari db_connections.
 func (s *Store) ListDatabases(ctx context.Context) ([]Database, error) {
@@ -343,7 +371,7 @@ func (s *Store) ListDatabases(ctx context.Context) ([]Database, error) {
 	return out, rows.Err()
 }
 
-// Access matrix 
+// Access matrix
 func (s *Store) ListGroupAccess(ctx context.Context) ([]GroupAccess, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT group_id, db_id, level FROM group_db_access`)

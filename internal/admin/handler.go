@@ -5,14 +5,14 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 type Handler struct {
-	store *Store
-	revoker contract.SessionRevoker
+	store    *Store
+	revoker  contract.SessionRevoker
 	renderer Renderer
-	logger *slog.Logger
+	logger   *slog.Logger
 }
 
 func NewHandler(store *Store, revoker contract.SessionRevoker, renderer Renderer, logger *slog.Logger) *Handler {
@@ -44,6 +44,8 @@ func (h *Handler) Routes(mux *http.ServeMux, authenticate, adminGuard func(http.
 	mux.Handle("GET /admin/groups", w(h.ListGroups))
 	mux.Handle("POST /admin/groups", w(h.CreateGroup))
 	mux.Handle("GET /admin/groups/{id}", w(h.ShowGroup))
+	mux.Handle("POST /admin/groups/{id}/edit", w(h.UpdateGroup))
+	mux.Handle("POST /admin/groups/{id}", w(h.UpdateGroup))
 	mux.Handle("POST /admin/groups/{id}/delete", w(h.DeleteGroup))
 	mux.Handle("POST /admin/groups/{id}/members", w(h.AddMember))
 	mux.Handle("POST /admin/groups/{id}/members/{uid}/remove", w(h.RemoveMember))
@@ -57,7 +59,7 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, templatePath st
 	p, _ := contract.PrincipalFrom(r.Context())
 	data.Principal = p
 	data.CSRFToken = csrfToken(r.Context())
-	
+
 	if err := h.renderer.Render(w, templatePath, data); err != nil {
 		h.logger.Error("render admin template failed", "template", templatePath)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)

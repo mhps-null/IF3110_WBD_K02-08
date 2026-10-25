@@ -56,8 +56,44 @@ func TestRemoveMember_InvalidPath(t *testing.T) {
 	req.SetPathValue("uid", "1")
 	rr := httptest.NewRecorder()
 	h.RemoveMember(rr, req)
-	
+
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("got %d, want 404", rr.Code)
+	}
+}
+
+func TestUpdateGroup_InvalidID(t *testing.T) {
+	h := newHandlerForTest(nil, &fakeRevoker{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/groups/abc/edit", nil)
+	req.SetPathValue("id", "abc")
+	rr := httptest.NewRecorder()
+	h.UpdateGroup(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("got %d, want 404", rr.Code)
+	}
+}
+
+func TestUpdateGroup_ValidatesName(t *testing.T) {
+	h := newHandlerForTest(nil, &fakeRevoker{})
+	cases := []struct{ name, group string }{
+		{"empty", ""},
+		{"whitespace only", "   "},
+		{"too long", strings.Repeat("a", 101)},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			form := url.Values{"name": {c.group}}
+			req := httptest.NewRequest(http.MethodPost, "/admin/groups/42/edit", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.SetPathValue("id", "42")
+			rr := httptest.NewRecorder()
+			h.UpdateGroup(rr, req)
+
+			if loc := rr.Header().Get("Location"); loc != "/admin/groups/42?flash=error" {
+				t.Fatalf("got %q, want /admin/groups/42?flash=error", loc)
+			}
+		})
 	}
 }
