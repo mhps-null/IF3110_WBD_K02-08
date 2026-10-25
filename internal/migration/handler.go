@@ -14,13 +14,15 @@ type Handler struct {
 	service  Service
 	renderer Renderer
 	guards   contract.Guards
+	checker  contract.AccessChecker
 }
 
-func NewHandler(service Service, renderer Renderer, guards contract.Guards) *Handler {
+func NewHandler(service Service, renderer Renderer, guards contract.Guards, checker contract.AccessChecker) *Handler { // <-- TAMBAHKAN PARAMETER
 	return &Handler{
 		service:  service,
 		renderer: renderer,
 		guards:   guards,
+		checker:  checker,
 	}
 }
 
@@ -73,6 +75,9 @@ func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {
 	csrf, _ := contract.CSRFTokenFrom(r.Context())
 	flash := r.URL.Query().Get("flash")
 
+	level, err := h.checker.EffectiveLevel(r.Context(), principal.UserID, dbID)
+	canEdit := (err == nil && level >= contract.AccessViewEdit)
+
 	migrations, err := h.service.ListMigrations(r.Context(), dbID)
 	if err != nil {
 		http.Error(w, "Gagal memuat riwayat migration.", http.StatusInternalServerError)
@@ -86,6 +91,7 @@ func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {
 		Data: map[string]any{
 			"DBID":       dbID,
 			"Migrations": migrations,
+			"CanEdit":    canEdit,
 		},
 	}
 
@@ -239,6 +245,9 @@ func (h *Handler) MigrationDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	level, err := h.checker.EffectiveLevel(r.Context(), principal.UserID, dbID)
+	canEdit := (err == nil && level >= contract.AccessViewEdit)
+
 	pageData := contract.PageData{
 		Principal: principal,
 		CSRFToken: csrf,
@@ -246,6 +255,7 @@ func (h *Handler) MigrationDetail(w http.ResponseWriter, r *http.Request) {
 		Data: map[string]any{
 			"DBID":      dbID,
 			"Migration": m,
+			"CanEdit":   canEdit,
 		},
 	}
 

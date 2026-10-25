@@ -122,6 +122,7 @@ type diffResultData struct {
 	Changes      []string
 	GeneratedSQL string
 	Engine       string
+	CanEdit      bool
 }
 
 func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
@@ -244,6 +245,7 @@ func (h *Handler) DoDiff(w http.ResponseWriter, r *http.Request) {
 			Changes:      formatted,
 			GeneratedSQL: sql,
 			Engine:       string(sourceEngine),
+			CanEdit:      sourceAccess.Level >= contract.AccessViewEdit,
 		},
 	})
 }
