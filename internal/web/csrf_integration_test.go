@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	authpkg "github.com/example/if3110-milestone1/internal/auth"
-	"github.com/example/if3110-milestone1/internal/session"
+	authpkg "github.com/mhps-null/IF3110_WBD_K02-08/internal/auth"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/session"
 )
 
 // csrfFlowUserRepository lets the real login handler run without a database.

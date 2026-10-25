@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/example/if3110-milestone1/internal/contract"
-	"github.com/example/if3110-milestone1/internal/testutil"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/testutil"
 )
 
 type fakeTargetDB struct{ engine contract.Engine }

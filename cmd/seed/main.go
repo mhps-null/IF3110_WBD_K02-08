@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/example/if3110-milestone1/internal/config"
-	"github.com/example/if3110-milestone1/internal/password"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/config"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/password"
 )
 
 func main() {

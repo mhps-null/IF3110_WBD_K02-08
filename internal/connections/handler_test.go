@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/example/if3110-milestone1/internal/contract"
-	"github.com/example/if3110-milestone1/internal/testutil"
-	"github.com/example/if3110-milestone1/internal/web"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/testutil"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/web"
 )
 
 type dummyRenderer struct{ err error }

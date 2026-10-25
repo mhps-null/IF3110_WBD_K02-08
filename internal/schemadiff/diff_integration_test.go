@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/if3110-milestone1/internal/contract"
-	my "github.com/example/if3110-milestone1/internal/dbdriver/mysql"
-	pg "github.com/example/if3110-milestone1/internal/dbdriver/postgres"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	my "github.com/mhps-null/IF3110_WBD_K02-08/internal/dbdriver/mysql"
+	pg "github.com/mhps-null/IF3110_WBD_K02-08/internal/dbdriver/postgres"
 )
 
 func diffIntegrationDB(t *testing.T, driver, dsn string) (*sql.DB, context.Context) {

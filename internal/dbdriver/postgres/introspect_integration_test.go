@@ -1,4 +1,3 @@
-
 package postgres
 
 import (
@@ -11,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/if3110-milestone1/internal/contract"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 func TestPostgresIntrospectIntegration(t *testing.T) {

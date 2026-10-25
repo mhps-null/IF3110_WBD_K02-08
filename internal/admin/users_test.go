@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 type captureRenderer struct{}
@@ -91,7 +91,7 @@ func TestResetPassword_ValidatesLength(t *testing.T) {
 	req.SetPathValue("id", "1")
 	rr := httptest.NewRecorder()
 	h.ResetPassword(rr, req)
-	
+
 	if loc := rr.Header().Get("Location"); loc != "/admin/users?flash=error" {
 		t.Fatalf("got location %q, want flash=error", loc)
 	}

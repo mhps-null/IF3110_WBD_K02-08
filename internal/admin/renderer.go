@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 type Renderer interface {
@@ -34,7 +34,7 @@ func (r *TemplateRenderer) Render(w http.ResponseWriter, templatePath string, da
 	if err != nil {
 		return fmt.Errorf("parse template %s: %w", templatePath, err)
 	}
-	
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	return tmpl.ExecuteTemplate(w, "layout.html", data)
 }

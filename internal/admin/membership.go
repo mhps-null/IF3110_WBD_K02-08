@@ -51,6 +51,6 @@ func (h *Handler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		redirect(w, r, "/admin/groups/"+strconv.FormatInt(groupID, 10)+"?flash=error")
 		return
 	}
-	
+
 	redirect(w, r, "/admin/groups/"+strconv.FormatInt(groupID, 10)+"?flash=removed")
 }

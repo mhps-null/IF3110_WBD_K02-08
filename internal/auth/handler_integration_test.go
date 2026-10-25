@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/if3110-milestone1/internal/contract"
-	"github.com/example/if3110-milestone1/internal/password"
-	"github.com/example/if3110-milestone1/internal/session"
-	"github.com/example/if3110-milestone1/internal/web"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/password"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/session"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/web"
 )
 
 // One real SQL flow covers auth/session interactions; TEST_DATABASE_URL needs the metadata schema.

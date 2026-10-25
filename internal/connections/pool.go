@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/example/if3110-milestone1/internal/contract"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 type cachedPool struct {
@@ -65,7 +65,7 @@ func (p *PoolManager) Open(ctx context.Context, dbID int64) (*sql.DB, contract.E
 
 	conn, plainPassword, err := p.repo.FindByIDWithPassword(ctx, dbID)
 	if err != nil {
-		return nil, "", err	
+		return nil, "", err
 	}
 
 	dsn, err := BuildDSN(conn, plainPassword)

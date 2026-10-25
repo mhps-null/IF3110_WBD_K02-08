@@ -7,12 +7,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 type fakeChecker struct {
 	levels map[int64]map[int64]contract.AccessLevel
-	err error
+	err    error
 }
 
 func (f *fakeChecker) EffectiveLevel(_ context.Context, userID, dbID int64) (contract.AccessLevel, error) {

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/if3110-milestone1/internal/contract"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 func TestMySQLIntrospectIntegration(t *testing.T) {

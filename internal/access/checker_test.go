@@ -3,13 +3,13 @@ package access
 import (
 	"testing"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 func TestLevelFromDB(t *testing.T) {
 	cases := []struct {
 		name string
-		in int64
+		in   int64
 		want contract.AccessLevel
 	}{
 		{"no group", 0, contract.AccessNone},
@@ -18,7 +18,7 @@ func TestLevelFromDB(t *testing.T) {
 		{"unknown value fails closed", 3, contract.AccessNone},
 		{"negative value fails closed", -1, contract.AccessNone},
 	}
-	
+
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := levelFromDB(c.in); got != c.want {

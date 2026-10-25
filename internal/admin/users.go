@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/example/if3110-milestone1/internal/contract"
-	"github.com/example/if3110-milestone1/internal/password"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/password"
 )
 
 type usersPageData struct {
@@ -156,7 +156,7 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		
+
 		h.logger.Error("reset password failed", "user_id", targetID)
 		http.Redirect(w, r, "/admin/users?flash=error", http.StatusSeeOther)
 		return

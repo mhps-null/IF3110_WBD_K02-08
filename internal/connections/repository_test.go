@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 // Smoke test for the fake used by handler/pool tests; real SQL CRUD has an integration test.

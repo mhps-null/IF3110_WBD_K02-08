@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/example/if3110-milestone1/internal/admin"
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/admin"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 type Handler struct {

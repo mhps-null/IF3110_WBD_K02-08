@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 // ParseMySQLPlan handles estimated JSON from both engines and MariaDB ANALYZE JSON.

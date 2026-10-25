@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 // MemoryRepository is an in-memory implementation of Repository for unit tests and local development.

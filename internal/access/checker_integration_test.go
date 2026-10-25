@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 const schemaPath = "../../migrations_meta/001_initial_schema.sql"
@@ -70,9 +70,9 @@ func TestCheckerIntegration(t *testing.T) {
 	// EffectiveLevel
 	t.Run("EffectiveLevel", func(t *testing.T) {
 		cases := []struct {
-			name string
+			name     string
 			user, db int64
-			want contract.AccessLevel
+			want     contract.AccessLevel
 		}{
 			{"alice / zeta-db -> view only (grup A)", data.Alice, data.DB1, contract.AccessViewOnly},
 			{"alice / alpha-db -> view edit (grup A)", data.Alice, data.DB2, contract.AccessViewEdit},
@@ -132,7 +132,7 @@ func applySchema(t *testing.T, db *sql.DB, path string) {
 
 type seedData struct {
 	Alice, Admin, Inactive, Both int64
-	DB1, DB2 int64 // DB1 = "zeta-db", DB2 = "alpha-db"
+	DB1, DB2                     int64 // DB1 = "zeta-db", DB2 = "alpha-db"
 }
 
 func seed(t *testing.T, db *sql.DB) seedData {

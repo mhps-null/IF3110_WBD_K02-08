@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/example/if3110-milestone1/internal/admin"
-	"github.com/example/if3110-milestone1/internal/contract"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/admin"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 type schemaDiffAccessChecker struct {

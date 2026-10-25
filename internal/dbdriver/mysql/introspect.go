@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 // Introspector implements schema snapshotting and bounded row queries for MySQL 8.0+ and MariaDB 10.3+.

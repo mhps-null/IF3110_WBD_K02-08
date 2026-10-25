@@ -5,13 +5,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 type matrixCell struct {
-	DBID int64
+	DBID   int64
 	DBName string
-	Level int // 0 = none, 1 = view only, 2 = view + edit
+	Level  int // 0 = none, 1 = view only, 2 = view + edit
 }
 type matrixRow struct {
 	Group Group

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/example/if3110-milestone1/internal/contract"
-	"github.com/example/if3110-milestone1/internal/explain"
 	mysqldriver "github.com/go-sql-driver/mysql"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/explain"
 )
 
 var readableExplainSQL = regexp.MustCompile(`(?i)^\s*(SELECT|WITH|TABLE)\b`)

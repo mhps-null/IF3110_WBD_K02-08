@@ -1,6 +1,6 @@
 # Catatan integrasi P1 sebelum merge
 
-1. Ganti `github.com/example/if3110-milestone1` di `go.mod` dan seluruh import internal dengan module path repository kelompok.
+1. Ganti `github.com/mhps-null/IF3110_WBD_K02-08` di `go.mod` dan seluruh import internal dengan module path repository kelompok.
 2. Kontrak `internal/contract` dan skema metadata harus mengikuti keputusan kickoff. Karena P2 belum mengimplementasikan perubahan akses, ketentuan versi otorisasi di bawah perlu disepakati sebelum P2 mulai.
 3. Terapkan migration additive `migrations_meta/002_session_privilege_version.sql` setelah `001_initial_schema.sql` pada database metadata development dan database integration test. Migration menambahkan `users.privilege_version` serta `sessions.privilege_version`; jangan mengedit migration `001` yang sudah dibekukan.
 4. Pada pembuatan session, P1 menyalin `users.privilege_version` ke `sessions.privilege_version`. Pada setiap request terlindungi, P1 membandingkan keduanya. Jika berbeda, middleware merotasi Session ID dan menyimpan versi terbaru pada row session. `absolute_expires_at` tidak berubah.

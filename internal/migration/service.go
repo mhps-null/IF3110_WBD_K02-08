@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/example/if3110-milestone1/internal/contract"
-	"github.com/example/if3110-milestone1/internal/dbdriver/mysql"
-	"github.com/example/if3110-milestone1/internal/dbdriver/postgres"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/dbdriver/mysql"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/dbdriver/postgres"
 )
 
 // ErrTargetCommittedMetadataUnknown means the target SQL transaction succeeded,
