@@ -247,6 +247,11 @@ func (h *Handler) MigrationDetail(w http.ResponseWriter, r *http.Request) {
 
 	level, err := h.checker.EffectiveLevel(r.Context(), principal.UserID, dbID)
 	canEdit := (err == nil && level >= contract.AccessViewEdit)
+	
+	var diag *ErrorDiagnostic
+	if m.ErrorMessage != nil && *m.ErrorMessage != "" {
+		diag = DiagnoseError(nil, m.ErrorMessage, "")
+	}
 
 	pageData := contract.PageData{
 		Principal: principal,
@@ -256,6 +261,7 @@ func (h *Handler) MigrationDetail(w http.ResponseWriter, r *http.Request) {
 			"DBID":      dbID,
 			"Migration": m,
 			"CanEdit":   canEdit,
+			"Diagnostic": diag,
 		},
 	}
 
@@ -339,6 +345,13 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 			*updatedM.Version, res.Duration, res.RowsAffected)
 	}
 
+	var diag *ErrorDiagnostic
+	if execErr != nil {
+		diag = DiagnoseError(execErr, nil, "")
+	} else if updatedM != nil && updatedM.ErrorMessage != nil && *updatedM.ErrorMessage != "" {
+		diag = DiagnoseError(nil, updatedM.ErrorMessage, "")
+	}
+
 	pageData := contract.PageData{
 		Principal: principal,
 		CSRFToken: csrf,
@@ -348,6 +361,7 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 			"Migration":  updatedM,
 			"ExecResult": res,
 			"ExecError":  execErr,
+			"Diagnostic": diag,
 		},
 	}
 

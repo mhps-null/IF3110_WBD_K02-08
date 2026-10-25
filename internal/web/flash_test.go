@@ -52,11 +52,13 @@ func TestFlashManagerRejectsTamperedCookie(t *testing.T) {
 	setRecorder := httptest.NewRecorder()
 	manager.Set(setRecorder, "success", "Berhasil masuk.")
 	cookie := setRecorder.Result().Cookies()[0]
-	replacement := "x"
-	if strings.HasSuffix(cookie.Value, replacement) {
-		replacement = "y"
+	b := []byte(cookie.Value)
+	if b[0] == 'x' {
+		b[0] = 'y'
+	} else {
+		b[0] = 'x'
 	}
-	cookie.Value = cookie.Value[:len(cookie.Value)-1] + replacement
+	cookie.Value = string(b)
 
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	request.AddCookie(cookie)

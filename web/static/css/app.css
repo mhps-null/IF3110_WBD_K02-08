@@ -217,7 +217,7 @@ small.field-hint, .field-hint { display: block; margin-top: -.35rem; color: var(
 .badge-fk { background: #edf2ff; color: #3730a3; border-color: #dbe4ff; }
 .badge-unique { background: #fff0f6; color: #a51d5d; border-color: #fbcfe8; }
 .badge-check { background: #f6edff; color: #6b21a8; border-color: #e9d5ff; }
-.badge-view, .badge-draft, .badge-neutral { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+.badge-view, .badge-draft, .badge-neutral, .badge-non-unique { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
 .badge-edit, .badge-success { background: #ecfdf3; color: #167347; border-color: #c5eed6; }
 .badge-failed, .badge-danger { background: #fef3f2; color: #b42318; border-color: #fecdca; }
 .badge-warning { background: #fffaeb; color: #925f00; border-color: #fedf89; }
