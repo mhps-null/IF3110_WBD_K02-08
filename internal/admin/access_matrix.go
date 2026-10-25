@@ -86,6 +86,7 @@ func (h *Handler) ShowMatrix(w http.ResponseWriter, r *http.Request) {
 		return data.AccessEntries[i].GroupName < data.AccessEntries[j].GroupName
 	})
 
+	data.Groups = groups
 	selectedDBID, parseErr := strconv.ParseInt(r.URL.Query().Get("db_id"), 10, 64)
 	if parseErr == nil && selectedDBID > 0 {
 		for _, db := range dbs {
@@ -97,26 +98,23 @@ func (h *Handler) ShowMatrix(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if data.SelectedDatabase != 0 {
-		data.Groups = groups
-		selectedGroupID, err := strconv.ParseInt(r.URL.Query().Get("group_id"), 10, 64)
-		if err == nil && selectedGroupID > 0 {
-			for _, group := range groups {
-				if group.ID == selectedGroupID {
-					data.SelectedGroupID = group.ID
-					data.SelectedGroup = group.Name
-					data.GroupSelected = true
-					break
-				}
+	selectedGroupID, err := strconv.ParseInt(r.URL.Query().Get("group_id"), 10, 64)
+	if err == nil && selectedGroupID > 0 {
+		for _, group := range groups {
+			if group.ID == selectedGroupID {
+				data.SelectedGroupID = group.ID
+				data.SelectedGroup = group.Name
+				data.GroupSelected = true
+				break
 			}
 		}
+	}
 
-		if data.GroupSelected {
-			for _, item := range access {
-				if item.GroupID == data.SelectedGroupID && item.DBID == data.SelectedDatabase {
-					data.SelectedLevel = item.Level
-					break
-				}
+	if data.SelectedDatabase != 0 && data.GroupSelected {
+		for _, item := range access {
+			if item.GroupID == data.SelectedGroupID && item.DBID == data.SelectedDatabase {
+				data.SelectedLevel = item.Level
+				break
 			}
 		}
 	}
@@ -152,7 +150,7 @@ func (h *Handler) SetAccess(w http.ResponseWriter, r *http.Request) {
 
 	if len(r.PostForm) != 4 || len(r.PostForm["csrf_token"]) != 1 ||
 		len(r.PostForm["db_id"]) != 1 || len(r.PostForm["group_id"]) != 1 ||
-		len(r.PostForm["level"]) != 1 {
+		len(r.PostForm["level"]) != 1 || r.PostForm["csrf_token"][0] == "" {
 		redirect(w, r, "/admin/access?flash=error")
 		return
 	}

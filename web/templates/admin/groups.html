@@ -1,10 +1,14 @@
 {{define "content"}}
 <header class="page-header">
-  <div class="page-header-main"><p class="eyebrow">Administrasi platform</p><h1>Group</h1><p class="page-description">Group menghubungkan pengguna dengan hak akses database. Akses efektif ditentukan oleh level tertinggi dari group yang diikuti.</p></div>
+  <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/">Beranda</a><span aria-hidden="true">/</span><span aria-current="page">Group</span>
+    </nav>
+    <p class="eyebrow">Administrasi platform</p>
+    <h1>Group</h1>
+    <p class="page-description">Group menghubungkan pengguna dengan hak akses database. Akses efektif ditentukan oleh level tertinggi dari group yang diikuti.</p>
+  </div>
 </header>
-<nav class="admin-nav" aria-label="Navigasi administrasi">
-  <a href="/admin/users">Pengguna</a><a href="/admin/groups" aria-current="page">Group</a><a href="/admin/access">Matriks akses</a>
-</nav>
 
 <div class="content-grid">
   <section class="panel">
@@ -18,7 +22,10 @@
   </section>
 
   <section class="panel">
-    <div class="panel-header"><div><h2>Daftar group</h2><p>Pilih group untuk mengelola membership pengguna.</p></div></div>
+    <div class="panel-header">
+      <div><h2>Daftar group</h2><p>Pilih group untuk mengelola membership pengguna.</p></div>
+      <span class="badge badge-neutral">{{len .Data.Groups}} group</span>
+    </div>
     {{if .Data.Groups}}
     <div class="table-wrapper">
       <table class="data-table">
@@ -26,10 +33,10 @@
         <tbody>
           {{range .Data.Groups}}
           <tr>
-            <td><strong><a href="/admin/groups/{{.ID}}">{{.Name}}</a></strong></td>
+            <td><strong>{{.Name}}</strong></td>
             <td>{{if .Description}}{{.Description}}{{else}}<span class="muted">—</span>{{end}}</td>
             <td><div class="action-row">
-              <a class="button btn-sm" href="/admin/groups/{{.ID}}">Kelola anggota</a>
+              <a class="button btn-sm" href="/admin/groups/{{.ID}}">Kelola group</a>
               <form method="post" action="/admin/groups/{{.ID}}/delete" class="inline-form" data-confirm="Hapus group {{.Name}}? Semua keanggotaan dan akses group ini ikut terhapus.">
                 <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button type="submit" class="btn-sm danger">Hapus</button>
               </form>

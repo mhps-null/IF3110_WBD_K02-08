@@ -1,16 +1,15 @@
 {{define "content"}}
 <header class="page-header">
   <div class="page-header-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/">Beranda</a><span aria-hidden="true">/</span><span aria-current="page">Pengguna</span>
+    </nav>
+    
     <p class="eyebrow">Administrasi platform</p>
     <h1>Pengguna</h1>
     <p class="page-description">Buat akun, atur status pengguna, dan reset password. Pengguna nonaktif tidak dapat login.</p>
   </div>
 </header>
-<nav class="admin-nav" aria-label="Navigasi administrasi">
-  <a href="/admin/users" aria-current="page">Pengguna</a>
-  <a href="/admin/groups">Group</a>
-  <a href="/admin/access">Matriks akses</a>
-</nav>
 
 <div class="content-grid">
   <section class="panel">
@@ -24,40 +23,48 @@
   </section>
 
   <section class="panel">
-    <div class="panel-header"><div><h2>Daftar pengguna</h2><p>Kelola role Platform Admin, status, dan kredensial akun yang sudah terdaftar.</p></div></div>
+    <div class="panel-header">
+      <div><h2>Daftar pengguna</h2><p>Kelola role Platform Admin, status, dan kredensial akun yang sudah terdaftar.</p></div>
+      <span class="badge badge-neutral">{{len .Data.Users}} pengguna</span>
+    </div>
     <div class="table-wrapper">
       <table class="data-table">
-        <thead><tr><th>Username</th><th>Platform Admin</th><th>Status</th><th>Dibuat</th><th>Aksi</th></tr></thead>
+        <thead><tr><th>Username</th><th>Admin</th><th>Status</th><th>Dibuat</th><th>Aksi</th></tr></thead>
         <tbody>
           {{range .Data.Users}}
           <tr>
             <td><strong>{{.Username}}</strong></td>
-            <td>{{if .IsAdmin}}<span class="badge badge-edit">Ya</span>{{else}}<span class="muted">Tidak</span>{{end}}</td>
+            <td>{{if .IsAdmin}}<span class="badge badge-edit">Ya</span>{{else}}<span class="badge badge-failed">Tidak</span>{{end}}</td>
             <td>{{if .IsActive}}<span class="badge badge-success">Aktif</span>{{else}}<span class="badge badge-failed">Nonaktif</span>{{end}}</td>
             <td>{{.CreatedAt.Format "02 Jan 2006 15:04"}}</td>
             <td>
               <div class="table-action-stack">
                 {{if eq .ID $.Principal.UserID}}
-                <span class="muted">Akun Anda</span>
-                {{else}}
+                <span class="muted" style="font-size: 0.8rem; margin-top: 4px;">Akun Anda</span>
+                {{end}}
+
+                {{if ne .ID $.Principal.UserID}}
                 <form method="post" action="/admin/users/{{.ID}}/toggle-admin" class="inline-form" {{if .IsAdmin}}data-confirm="Cabut hak Platform Admin dari pengguna ini? Session aktifnya akan dicabut."{{end}}>
                   <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                   <input type="hidden" name="is_admin" value="{{if .IsAdmin}}false{{else}}true{{end}}">
-                  <button type="submit" class="btn-sm">{{if .IsAdmin}}Cabut Hak Admin{{else}}Jadikan Admin{{end}}</button>
+                  <button type="submit" class="btn-sm danger">{{if .IsAdmin}}Cabut Hak Admin{{else}}Jadikan Admin{{end}}</button>
                 </form>
                 {{end}}
 
-                {{if .IsActive}}
-                <form method="post" action="/admin/users/{{.ID}}/deactivate" class="inline-form" data-confirm="Nonaktifkan pengguna ini?">
-                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                  <button type="submit" class="btn-sm danger">Nonaktifkan</button>
-                </form>
-                {{else}}
-                <form method="post" action="/admin/users/{{.ID}}/activate" class="inline-form">
-                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                  <button type="submit" class="btn-sm">Aktifkan</button>
-                </form>
+                {{if ne .ID $.Principal.UserID}}
+                  {{if .IsActive}}
+                  <form method="post" action="/admin/users/{{.ID}}/deactivate" class="inline-form" data-confirm="Nonaktifkan pengguna ini?">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit" class="btn-sm danger">Nonaktifkan</button>
+                  </form>
+                  {{else}}
+                  <form method="post" action="/admin/users/{{.ID}}/activate" class="inline-form">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit" class="btn-sm">Aktifkan</button>
+                  </form>
+                  {{end}}
                 {{end}}
+
                 <form method="post" action="/admin/users/{{.ID}}/reset-password" class="inline-form">
                   <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                   <label class="visually-hidden" for="reset-password-{{.ID}}">Password baru untuk {{.Username}}</label>

@@ -44,10 +44,10 @@ func TestSetAccess_InvalidDatabaseID(t *testing.T) {
 	}
 }
 
-func TestSetAccess_InvalidLevelValue(t *testing.T) {
+func TestSetAccess_InvalidOrUnselectedLevel(t *testing.T) {
 	h := newHandlerForTest(nil, &fakeRevoker{})
 
-	for _, lvl := range []string{"3", "-1", "abc", "99", "undefined"} {
+	for _, lvl := range []string{"", "3", "-1", "abc", "99", "undefined"} {
 		t.Run("lvl="+lvl, func(t *testing.T) {
 			form := url.Values{"csrf_token": {"token"}, "db_id": {"1"}, "group_id": {"1"}, "level": {lvl}}
 			req := httptest.NewRequest(http.MethodPost, "/admin/access", strings.NewReader(form.Encode()))
@@ -67,6 +67,18 @@ func TestSetAccess_UnexpectedFieldsOrMultipleValues(t *testing.T) {
 
 	t.Run("unexpected field", func(t *testing.T) {
 		form := url.Values{"csrf_token": {"token"}, "db_id": {"1"}, "group_id": {"1"}, "level": {"1"}, "unknown": {"value"}}
+		req := httptest.NewRequest(http.MethodPost, "/admin/access", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+		h.SetAccess(rr, req)
+
+		if loc := rr.Header().Get("Location"); loc != "/admin/access?flash=error" {
+			t.Fatalf("got %q, want flash=error", loc)
+		}
+	})
+
+	t.Run("missing csrf token", func(t *testing.T) {
+		form := url.Values{"db_id": {"1"}, "group_id": {"1"}, "level": {"1"}}
 		req := httptest.NewRequest(http.MethodPost, "/admin/access", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
