@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/example/if3110-milestone1/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
 
 type GuardsConfig struct {
-	Checker contract.AccessChecker
+	Checker         contract.AccessChecker
 	DBIDFromRequest func(*http.Request) (int64, bool) // kalo nil, ambil {id} dr Go ServeMux
 }
 
@@ -25,7 +25,7 @@ func NewGuards(cfg GuardsConfig) contract.Guards {
 
 	g := &guards{checker: cfg.Checker, dbID: extract}
 	return contract.Guards{
-		Admin: g.admin,
+		Admin:  g.admin,
 		ViewDB: g.viewDB,
 		EditDB: g.editDB,
 	}
@@ -33,7 +33,7 @@ func NewGuards(cfg GuardsConfig) contract.Guards {
 
 type guards struct {
 	checker contract.AccessChecker
-	dbID func(*http.Request) (int64, bool)
+	dbID    func(*http.Request) (int64, bool)
 }
 
 func defaultDBIDFromRequest(r *http.Request) (int64, bool) {
@@ -70,11 +70,41 @@ func (g *guards) admin(next http.Handler) http.Handler {
 }
 
 func (g *guards) viewDB(next http.Handler) http.Handler {
-	return g.requireDBLevel(next, contract.AccessViewOnly)
+	return g.requireAction(next, ActionViewSchema)
 }
 
 func (g *guards) editDB(next http.Handler) http.Handler {
-	return g.requireDBLevel(next, contract.AccessViewEdit)
+	return g.requireAction(next, ActionCreateMigration)
+}
+
+func (g *guards) requireAction(next http.Handler, action Action) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := contract.PrincipalFrom(r.Context())
+		if !ok {
+			denyUnauthenticated(w)
+			return
+		}
+
+		dbID, ok := g.dbID(r)
+		if !ok {
+			http.Error(w, "invalid database id", http.StatusBadRequest)
+			return
+		}
+
+		level, err := g.checker.EffectiveLevel(r.Context(), p.UserID, dbID)
+		if err != nil {
+			log.Printf("access: guard: effective level user=%d db=%d: %v", p.UserID, dbID, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		if !Allows(level, action) {
+			denyForbidden(w)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // access dicek tiap request supaya perubahan/revoke akses langsung berlaku
