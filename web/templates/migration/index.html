@@ -5,11 +5,7 @@
     <p class="eyebrow">Perubahan database</p><h1>Riwayat migration</h1>
     <p class="page-description">Tinjau draft, status eksekusi, versi, dan checksum perubahan schema pada database ini.</p>
   </div>
-  <div class="page-header-actions">
-    {{if .Data.CanEdit}}
-    <a href="/databases/{{.Data.DBID}}/migrations/new" class="button primary"><span aria-hidden="true">+</span> Buat migration</a>
-    {{end}}
-  </div>
+  <div class="page-header-actions"><a href="/databases/{{.Data.DBID}}/migrations/new" class="button primary"><span aria-hidden="true">+</span> Buat migration</a></div>
 </header>
 
 <nav class="tabs" aria-label="Navigasi database"><a href="/databases/{{.Data.DBID}}/schema" class="tab-link">Schema</a><a href="/databases/{{.Data.DBID}}/migrations" class="tab-link active" aria-current="page">Riwayat migration</a></nav>
@@ -28,17 +24,8 @@
         <td class="mono checksum" title="{{deref .Checksum}}">{{if .Checksum}}{{slice (deref .Checksum) 0 8}}…{{else}}<span class="muted">—</span>{{end}}</td>
         <td><a href="/databases/{{$.Data.DBID}}/migrations/{{.ID}}" class="button btn-sm">Tinjau detail</a></td>
       </tr>
-        {{else}}
-      <tr><td colspan="8" class="empty-cell">
-        <div class="empty-state-icon" aria-hidden="true">↗</div>
-        <strong>Belum ada migration</strong>
-        {{if .Data.CanEdit}}
-        <p>Buat draft pertama untuk menyiapkan perubahan database yang dapat ditinjau sebelum eksekusi.</p>
-        <a class="button primary btn-sm" href="/databases/{{$.Data.DBID}}/migrations/new">Buat migration pertama</a>
-        {{else}}
-        <p>Belum ada riwayat migration pada database ini.</p>
-        {{end}}
-      </td></tr>
+    {{else}}
+      <tr><td colspan="8" class="empty-cell"><div class="empty-state-icon" aria-hidden="true">↗</div><strong>Belum ada migration</strong><p>Buat draft pertama untuk menyiapkan perubahan database yang dapat ditinjau sebelum eksekusi.</p><a class="button primary btn-sm" href="/databases/{{$.Data.DBID}}/migrations/new">Buat migration pertama</a></td></tr>
     {{end}}</tbody>
   </table></div>
 </section>

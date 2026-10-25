@@ -117,7 +117,6 @@ func main() {
 		migration.NewService(migration.NewSQLRepository(db), poolManager),
 		migration.NewHTMLRenderer("web/templates"),
 		guards,
-		checker,
 	)
 	migrationHandler.RegisterRoutesWithAuth(mux, authHandler.Authenticate)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

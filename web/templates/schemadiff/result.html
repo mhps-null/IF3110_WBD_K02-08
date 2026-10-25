@@ -15,26 +15,13 @@
 </section>
 
 <section class="panel">
-  <div class="panel-header"><div><h2>Kandidat SQL migration</h2><p>Engine target: <span class="badge badge-{{.Data.Engine}}">{{.Data.Engine}} {{if .Data.CanEdit}} </span>. SQL tetap dapat diedit sebelum disimpan. {{end}}</p></div></div>
-  {{if .Data.CanEdit}}
+  <div class="panel-header"><div><h2>Kandidat SQL migration</h2><p>Engine target: <span class="badge badge-{{.Data.Engine}}">{{.Data.Engine}}</span>. SQL tetap dapat diedit sebelum disimpan.</p></div></div>
   <form method="post" action="/databases/{{.Data.SourceDBID}}/migrations/new" class="stack">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <div class="form-field"><label for="title">Judul draft</label><input id="title" name="title" type="text" required maxlength="200" value="Sinkronisasi schema otomatis"></div>
     <div class="form-field"><label for="sql">SQL yang dihasilkan</label><textarea class="sql-editor" id="sql" name="sql" rows="18" required spellcheck="false" autocapitalize="off" autocomplete="off">{{.Data.GeneratedSQL}}</textarea><small class="field-hint">Tinjau seluruh statement, identifier, destructive change, dan dependency sebelum menyimpan.</small></div>
     <div class="form-actions"><button type="submit" class="primary">Buka di editor migration</button><a class="button" href="/databases/{{.Data.SourceDBID}}/schema">Kembali ke schema</a></div>
   </form>
-
-  {{else}}
-  <div class="notice mb-1">Anda hanya memiliki akses View Only. Anda dapat melihat SQL ini, tetapi tidak dapat menyimpannya sebagai migration.</div>
-  <div class="form-field">
-    <label for="sql-readonly">SQL yang dihasilkan</label>
-    <textarea class="sql-editor" id="sql-readonly" rows="12" readonly spellcheck="false" style="height: 300px; max-height: 300px; resize: none; opacity: 0.9;">{{.Data.GeneratedSQL}}</textarea>
-  </div>
-  
-  <div class="form-actions" style="margin-top: 1rem;">
-    <a class="button" href="/databases/{{.Data.SourceDBID}}/schema">Kembali ke schema</a>
-  </div>
-  {{end}}
 </section>
 {{else}}
 <section class="empty-state"><span class="empty-state-icon" aria-hidden="true">✓</span><h2>Schema sudah sesuai</h2><p>Tidak ada perbedaan schema yang terdeteksi antara kedua database.</p><a class="button" href="/databases/{{.Data.SourceDBID}}/schema">Kembali ke schema</a></section>

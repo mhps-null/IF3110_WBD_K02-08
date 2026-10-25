@@ -19,13 +19,6 @@ type Handler struct {
 	guards        contract.Guards
 }
 
-type schemaPageData struct {
-	DBID     int64
-	Engine   contract.Engine
-	Snapshot contract.SchemaSnapshot
-	CanEdit  bool
-}
-
 func defaultSchemaForEngine(rawSchema string, engine contract.Engine) string {
 	if engine == contract.EngineMySQL || engine == contract.EngineMariaDB {
 		if rawSchema == "public" {
@@ -169,17 +162,15 @@ func (h *Handler) DatabaseSchema(w http.ResponseWriter, r *http.Request) {
 
 	principal, _ := contract.PrincipalFrom(r.Context())
 	csrf, _ := contract.CSRFTokenFrom(r.Context())
-	level, err := h.accessChecker.EffectiveLevel(r.Context(), principal.UserID, dbID)
-	if err != nil {
-		http.Error(w, "failed to check database access", http.StatusInternalServerError)
-		return
-	}
 
-	data := schemaPageData{
+	data := struct {
+		DBID     int64
+		Engine   contract.Engine
+		Snapshot contract.SchemaSnapshot
+	}{
 		DBID:     dbID,
 		Engine:   engine,
 		Snapshot: snapshot,
-		CanEdit:  level >= contract.AccessViewEdit,
 	}
 
 	if err := h.renderer.Render(w, "viewer/schema.html", contract.PageData{
