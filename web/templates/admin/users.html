@@ -24,7 +24,7 @@
   </section>
 
   <section class="panel">
-    <div class="panel-header"><div><h2>Daftar pengguna</h2><p>Kelola status dan kredensial akun yang sudah terdaftar.</p></div></div>
+    <div class="panel-header"><div><h2>Daftar pengguna</h2><p>Kelola role Platform Admin, status, dan kredensial akun yang sudah terdaftar.</p></div></div>
     <div class="table-wrapper">
       <table class="data-table">
         <thead><tr><th>Username</th><th>Platform Admin</th><th>Status</th><th>Dibuat</th><th>Aksi</th></tr></thead>
@@ -37,6 +37,16 @@
             <td>{{.CreatedAt.Format "02 Jan 2006 15:04"}}</td>
             <td>
               <div class="table-action-stack">
+                {{if eq .ID $.Principal.UserID}}
+                <span class="muted">Akun Anda</span>
+                {{else}}
+                <form method="post" action="/admin/users/{{.ID}}/toggle-admin" class="inline-form" {{if .IsAdmin}}data-confirm="Cabut hak Platform Admin dari pengguna ini? Session aktifnya akan dicabut."{{end}}>
+                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                  <input type="hidden" name="is_admin" value="{{if .IsAdmin}}false{{else}}true{{end}}">
+                  <button type="submit" class="btn-sm">{{if .IsAdmin}}Cabut Hak Admin{{else}}Jadikan Admin{{end}}</button>
+                </form>
+                {{end}}
+
                 {{if .IsActive}}
                 <form method="post" action="/admin/users/{{.ID}}/deactivate" class="inline-form" data-confirm="Nonaktifkan pengguna ini?">
                   <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">

@@ -13,7 +13,7 @@ func TestSetAccess_InvalidGroupID(t *testing.T) {
 
 	for _, gid := range []string{"", "abc", "0", "-1"} {
 		t.Run("gid="+gid, func(t *testing.T) {
-			form := url.Values{"group_id": {gid}, "level_1": {"1"}}
+			form := url.Values{"csrf_token": {"token"}, "db_id": {"1"}, "group_id": {gid}, "level": {"1"}}
 			req := httptest.NewRequest(http.MethodPost, "/admin/access", strings.NewReader(form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			rr := httptest.NewRecorder()
@@ -29,9 +29,9 @@ func TestSetAccess_InvalidGroupID(t *testing.T) {
 func TestSetAccess_InvalidDatabaseID(t *testing.T) {
 	h := newHandlerForTest(nil, &fakeRevoker{})
 
-	for _, dbField := range []string{"level_", "level_abc", "level_0", "level_-1"} {
-		t.Run(dbField, func(t *testing.T) {
-			form := url.Values{"group_id": {"1"}, dbField: {"1"}}
+	for _, dbID := range []string{"", "abc", "0", "-1"} {
+		t.Run(dbID, func(t *testing.T) {
+			form := url.Values{"csrf_token": {"token"}, "db_id": {dbID}, "group_id": {"1"}, "level": {"1"}}
 			req := httptest.NewRequest(http.MethodPost, "/admin/access", strings.NewReader(form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			rr := httptest.NewRecorder()
@@ -49,7 +49,7 @@ func TestSetAccess_InvalidLevelValue(t *testing.T) {
 
 	for _, lvl := range []string{"3", "-1", "abc", "99", "undefined"} {
 		t.Run("lvl="+lvl, func(t *testing.T) {
-			form := url.Values{"group_id": {"1"}, "level_1": {lvl}}
+			form := url.Values{"csrf_token": {"token"}, "db_id": {"1"}, "group_id": {"1"}, "level": {lvl}}
 			req := httptest.NewRequest(http.MethodPost, "/admin/access", strings.NewReader(form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			rr := httptest.NewRecorder()
@@ -66,7 +66,7 @@ func TestSetAccess_UnexpectedFieldsOrMultipleValues(t *testing.T) {
 	h := newHandlerForTest(nil, &fakeRevoker{})
 
 	t.Run("unexpected field", func(t *testing.T) {
-		form := url.Values{"group_id": {"1"}, "unknown": {"value"}}
+		form := url.Values{"csrf_token": {"token"}, "db_id": {"1"}, "group_id": {"1"}, "level": {"1"}, "unknown": {"value"}}
 		req := httptest.NewRequest(http.MethodPost, "/admin/access", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()
@@ -78,7 +78,7 @@ func TestSetAccess_UnexpectedFieldsOrMultipleValues(t *testing.T) {
 	})
 
 	t.Run("multiple values for same level", func(t *testing.T) {
-		form := url.Values{"group_id": {"1"}, "level_1": {"1", "2"}}
+		form := url.Values{"csrf_token": {"token"}, "db_id": {"1"}, "group_id": {"1"}, "level": {"1", "2"}}
 		req := httptest.NewRequest(http.MethodPost, "/admin/access", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rr := httptest.NewRecorder()

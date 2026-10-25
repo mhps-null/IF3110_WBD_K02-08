@@ -96,3 +96,39 @@ func TestResetPassword_ValidatesLength(t *testing.T) {
 		t.Fatalf("got location %q, want flash=error", loc)
 	}
 }
+
+func TestToggleAdmin_RejectsSelfDemotion(t *testing.T) {
+	h := newHandlerForTest(nil, &fakeRevoker{})
+	form := url.Values{"is_admin": {"false"}}
+	req := httptest.NewRequest(http.MethodPost, "/admin/users/7/toggle-admin", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("id", "7")
+	req = withPrincipal(req, contract.Principal{UserID: 7, IsPlatformAdmin: true})
+	rr := httptest.NewRecorder()
+
+	h.ToggleAdmin(rr, req)
+
+	if loc := rr.Header().Get("Location"); loc != "/admin/users?flash=error" {
+		t.Fatalf("got location %q, want flash=error", loc)
+	}
+}
+
+func TestToggleAdmin_ValidatesRoleValue(t *testing.T) {
+	h := newHandlerForTest(nil, &fakeRevoker{})
+	for _, role := range []string{"", "yes", "1", "false,true"} {
+		t.Run(role, func(t *testing.T) {
+			form := url.Values{"is_admin": {role}}
+			req := httptest.NewRequest(http.MethodPost, "/admin/users/8/toggle-admin", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.SetPathValue("id", "8")
+			req = withPrincipal(req, contract.Principal{UserID: 7, IsPlatformAdmin: true})
+			rr := httptest.NewRecorder()
+
+			h.ToggleAdmin(rr, req)
+
+			if loc := rr.Header().Get("Location"); loc != "/admin/users?flash=error" {
+				t.Fatalf("got location %q, want flash=error", loc)
+			}
+		})
+	}
+}

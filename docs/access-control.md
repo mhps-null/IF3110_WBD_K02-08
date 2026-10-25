@@ -65,6 +65,8 @@ P1 kemudian mendeteksi perubahan versi tersebut dan merotasi session ID pada req
 
 Rotasi hanya dilakukan jika memang ada perubahan data. Misalnya, menekan tombol "Simpan" tanpa mengubah data tidak akan memicu rotasi session yang tidak diperlukan.
 
+Perubahan role Platform Admin juga menaikkan `privilege_version` dan mencabut seluruh session user tersebut. Role dapat diberikan atau dicabut dari halaman Pengguna; admin tidak dapat mencabut role dirinya sendiri.
+
 ## Penolakan Akses
 
 | Kondisi | Response |

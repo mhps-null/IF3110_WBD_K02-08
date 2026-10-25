@@ -32,6 +32,8 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		flash = "User berhasil diaktifkan. Session lama tetap tidak berlaku; user harus login ulang."
 	case "password-reset":
 		flash = "Password berhasil direset dan seluruh session user dicabut."
+	case "admin-updated":
+		flash = "Hak Platform Admin berhasil diperbarui dan seluruh session user dicabut."
 	case "error":
 		flash = "Operasi gagal. Silakan coba lagi."
 	}
@@ -168,4 +170,42 @@ func parseID(r *http.Request, name string) (int64, bool) {
 	v := r.PathValue(name)
 	id, err := strconv.ParseInt(v, 10, 64)
 	return id, err == nil && id > 0
+}
+
+func (h *Handler) ToggleAdmin(w http.ResponseWriter, r *http.Request) {
+	targetID, ok := parseID(r, "id")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	if err := r.ParseForm(); err != nil {
+		redirect(w, r, "/admin/users?flash=error")
+		return
+	}
+
+	values := r.PostForm["is_admin"]
+	if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
+		redirect(w, r, "/admin/users?flash=error")
+		return
+	}
+	isAdmin := values[0] == "true"
+
+	p, _ := contract.PrincipalFrom(r.Context())
+	if p.UserID == targetID && !isAdmin {
+		redirect(w, r, "/admin/users?flash=error")
+		return
+	}
+
+	if err := h.store.TogglePlatformAdmin(r.Context(), targetID, isAdmin); err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		h.logger.Error("toggle platform admin failed", "user_id", targetID, "error", err)
+		redirect(w, r, "/admin/users?flash=error")
+		return
+	}
+	redirect(w, r, "/admin/users?flash=admin-updated")
 }

@@ -8,6 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -330,6 +333,66 @@ func TestStore_AccessMatrix(t *testing.T) {
 	})
 }
 
+func TestAccessFlow_SelectDatabaseGroupAndLevel(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewStore(db)
+	ctx := context.Background()
+	groupID, err := s.CreateGroup(ctx, "flow-group", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbID := insertDB(t, db, "flow-db")
+	h := NewHandler(s, nil, NewTemplateRenderer("../../web/templates"), nil)
+
+	getSelectedGroup := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet,
+			fmt.Sprintf("/admin/access?db_id=%d&group_id=%d", dbID, groupID), nil)
+		rr := httptest.NewRecorder()
+		h.ShowMatrix(rr, req)
+		return rr
+	}
+
+	beforeSave := getSelectedGroup()
+	if beforeSave.Code != http.StatusOK ||
+		!strings.Contains(beforeSave.Body.String(), "1. Pilih database") ||
+		!strings.Contains(beforeSave.Body.String(), "2. Pilih group") ||
+		!strings.Contains(beforeSave.Body.String(), "3. Pilih level akses") {
+		t.Fatalf("expected full selected database/group flow, got status %d", beforeSave.Code)
+	}
+
+	form := url.Values{
+		"csrf_token": {"test-token"},
+		"db_id":      {fmt.Sprint(dbID)},
+		"group_id":   {fmt.Sprint(groupID)},
+		"level":      {"2"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/admin/access", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	h.SetAccess(rr, req)
+
+	wantLocation := fmt.Sprintf("/admin/access?db_id=%d&group_id=%d&flash=saved", dbID, groupID)
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != wantLocation {
+		t.Fatalf("got status %d and location %q, want redirect to %q", rr.Code, rr.Header().Get("Location"), wantLocation)
+	}
+
+	var level int
+	if err := db.QueryRow(`SELECT level FROM group_db_access WHERE group_id = $1 AND db_id = $2`,
+		groupID, dbID).Scan(&level); err != nil {
+		t.Fatal(err)
+	}
+	if level != 2 {
+		t.Fatalf("saved level = %d, want 2", level)
+	}
+	afterSave := getSelectedGroup()
+	if !strings.Contains(afterSave.Body.String(), `<option value="2" selected>View + Edit</option>`) ||
+		!strings.Contains(afterSave.Body.String(), "flow-db") ||
+		!strings.Contains(afterSave.Body.String(), "flow-group") ||
+		!strings.Contains(afterSave.Body.String(), "View + Edit") {
+		t.Fatal("expected the saved access level and matrix entry to appear after redirect")
+	}
+}
+
 // TestStore_AccessIntegration adalah test end-to-end P2:
 // Setelah SetGroupAccess, AccessChecker.EffectiveLevel langsung mencerminkan
 // level terbaru pada request berikutnya — sesuai spec "hitung per request tanpa cache".
@@ -439,8 +502,7 @@ func TestStore_AccountStatusSessionLifecycle(t *testing.T) {
 		if err := s.DeactivateUser(ctx, uid); err != nil {
 			t.Fatal(err)
 		}
-		// A session that escaped revocation (e.g. written by a racing login)
-		// must also be invalidated by reactivation.
+
 		insertSession(t, db, uid, "react-leftover")
 		before := privilegeVersion(t, db, uid)
 
@@ -518,6 +580,50 @@ func TestStore_AccountStatusSessionLifecycle(t *testing.T) {
 			t.Fatal("a failed revocation must leave the account and sessions unchanged")
 		}
 	})
+}
+
+func TestStore_TogglePlatformAdminSessionLifecycle(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewStore(db)
+	ctx := context.Background()
+	userID := insertUser(t, db, "platform-admin-toggle", false)
+	insertSession(t, db, userID, "platform-admin-toggle-1")
+	before := privilegeVersion(t, db, userID)
+
+	if err := s.TogglePlatformAdmin(ctx, userID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	var isAdmin bool
+	if err := db.QueryRow(`SELECT is_platform_admin FROM users WHERE id = $1`, userID).Scan(&isAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if !isAdmin || activeSessions(t, db, userID) != 0 || privilegeVersion(t, db, userID) != before+1 {
+		t.Fatal("granting Platform Admin must update role, revoke sessions, and bump privilege_version")
+	}
+
+	insertSession(t, db, userID, "platform-admin-toggle-2")
+	before = privilegeVersion(t, db, userID)
+	if err := s.TogglePlatformAdmin(ctx, userID, true); err != nil {
+		t.Fatal(err)
+	}
+	if activeSessions(t, db, userID) != 1 || privilegeVersion(t, db, userID) != before {
+		t.Fatal("setting the existing Platform Admin role must not change privilege or sessions")
+	}
+
+	if err := s.TogglePlatformAdmin(ctx, userID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT is_platform_admin FROM users WHERE id = $1`, userID).Scan(&isAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if isAdmin || activeSessions(t, db, userID) != 0 || privilegeVersion(t, db, userID) != before+1 {
+		t.Fatal("revoking Platform Admin must update role, revoke sessions, and bump privilege_version")
+	}
+
+	if err := s.TogglePlatformAdmin(ctx, 999999, true); !errorsIs(err, ErrUserNotFound) {
+		t.Fatalf("want ErrUserNotFound, got %v", err)
+	}
 }
 
 func TestStore_DeleteConnectionCascadesAndBumpsPrivileges(t *testing.T) {

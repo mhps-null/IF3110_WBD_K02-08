@@ -391,10 +391,10 @@ func (s *Store) ListGroupAccess(ctx context.Context) ([]GroupAccess, error) {
 	return out, rows.Err()
 }
 
-// SetGroupAccessLevels updates all database access levels for a group in a single transaction.
-// entries maps dbID -> level (0: remove, 1: View Only, 2: View + Edit).
-// If any database ID is invalid/not found, or an invalid level is provided, the transaction is rolled back.
-// If any level actually changed, privilege_version is incremented once for all group members.
+// update semua level akses database untuk satu group dalam satu transaction
+// entries: dbID -> level (0: hapus akses, 1: View Only, 2: View + Edit)
+// kalau ada dbID yang ga valid atau level yang ga sesuai, semua perubahan di-rollback
+// kalau ada level yang beneran berubah, privilege_version semua member group dinaikkan sekali
 func (s *Store) SetGroupAccessLevels(ctx context.Context, groupID int64, entries map[int64]int) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -473,4 +473,40 @@ func (s *Store) SetGroupAccess(ctx context.Context, groupID, dbID int64, level i
 
 func (s *Store) RemoveGroupAccess(ctx context.Context, groupID, dbID int64) error {
 	return s.SetGroupAccessLevels(ctx, groupID, map[int64]int{dbID: 0})
+}
+
+func (s *Store) TogglePlatformAdmin(ctx context.Context, userID int64, isAdmin bool) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("toggle platform admin: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var current bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT is_platform_admin FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("toggle platform admin: load user: %w", err)
+	}
+
+	if current == isAdmin {
+		return tx.Commit()
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE users
+		SET is_platform_admin = $1, privilege_version = privilege_version + 1
+		WHERE id = $2`, isAdmin, userID); err != nil {
+		return fmt.Errorf("toggle platform admin: update user: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, userID); err != nil {
+		return fmt.Errorf("toggle platform admin: revoke sessions: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("toggle platform admin: commit: %w", err)
+	}
+	return nil
 }

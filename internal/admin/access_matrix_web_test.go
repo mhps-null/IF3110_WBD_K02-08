@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/web"
 )
 
@@ -55,6 +56,44 @@ func TestSetAccess_WebPayloadLimitExceeded(t *testing.T) {
 
 	if loc := rr.Header().Get("Location"); loc != "/admin/access?flash=error" {
 		t.Fatalf("expected redirect to /admin/access?flash=error on oversized body, got %q (code %d)", loc, rr.Code)
+	}
+}
+
+func TestAccessMatrixTemplate_RendersSequentialFlow(t *testing.T) {
+	output := httptest.NewRecorder()
+	renderer := NewTemplateRenderer("../../web/templates")
+	err := renderer.Render(output, "admin/access.html", contract.PageData{
+		Data: matrixPageData{
+			Databases:        []Database{{ID: 10, Name: "AppDB"}},
+			SelectedDatabase: 10,
+			SelectedDBName:   "AppDB",
+			Groups:           []Group{{ID: 2, Name: "Developers"}},
+			SelectedGroupID:  2,
+			SelectedGroup:    "Developers",
+			SelectedLevel:    1,
+			GroupSelected:    true,
+			AccessEntries: []accessMatrixEntry{
+				{DatabaseName: "AppDB", GroupName: "Developers", Level: 1},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("render access template: %v", err)
+	}
+
+	html := output.Body.String()
+	databaseStep := strings.Index(html, "1. Database")
+	groupStep := strings.Index(html, "2. Group")
+	levelStep := strings.Index(html, "3. Level akses")
+	if databaseStep < 0 || groupStep <= databaseStep || levelStep <= groupStep {
+		t.Fatalf("expected database, group, then access-level steps in order")
+	}
+	if !strings.Contains(html, `name="db_id" value="10"`) ||
+		!strings.Contains(html, `name="group_id"`) ||
+		!strings.Contains(html, `<option value="1" selected>View Only</option>`) ||
+		!strings.Contains(html, "Daftar matriks akses") ||
+		!strings.Contains(html, "Developers") {
+		t.Fatal("expected database/group selectors, current access level, and saved access list")
 	}
 }
 
