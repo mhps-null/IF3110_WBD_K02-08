@@ -69,7 +69,7 @@
 <div class="two-column-layout">
   <div class="side-stack">
     <section class="panel">
-      {{if .Data.Migration.IsEditable}}
+      {{if and .Data.Migration.IsEditable .Data.CanEdit}}
       <div class="panel-header"><div><h2>Editor draft</h2><p>Perubahan belum dijalankan dan masih dapat diedit.</p></div><span class="badge badge-draft">Editable</span></div>
       <form method="post" action="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}" class="stack">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
@@ -83,7 +83,7 @@
       {{end}}
     </section>
 
-    {{if .Data.Migration.IsEditable}}
+    {{if and .Data.Migration.IsEditable .Data.CanEdit}}
     <section class="panel panel-accent">
       <div class="panel-header"><div><h2>Analisis dan eksekusi</h2><p>Tinjau rencana query sebelum memutuskan menjalankan SQL.</p></div></div>
       <form method="post" action="/databases/{{.Data.DBID}}/migrations/{{.Data.Migration.ID}}/explain" class="stack">

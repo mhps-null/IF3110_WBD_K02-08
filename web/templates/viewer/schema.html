@@ -9,7 +9,9 @@
     <div class="page-title-row"><h1>Schema database</h1><span class="badge badge-{{.Data.Engine}}">{{.Data.Engine}}</span></div>
     <p class="page-description">Daftar tabel dan metadata schema yang dapat kamu akses pada database ini.</p>
     <div class="action-row page-actions">
+      {{if .Data.CanEdit}}
       <a class="button primary" href="/databases/{{.Data.DBID}}/migrations/new">Buat migration</a>
+      {{end}}
       <a class="button" href="/databases/{{.Data.DBID}}/migrations">Riwayat migration</a>
       <a class="button" href="/databases/{{.Data.DBID}}/schema-diff">Bandingkan schema</a>
     </div>
