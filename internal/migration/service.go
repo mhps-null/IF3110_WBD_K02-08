@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/dbdriver/mysql"
@@ -136,6 +137,15 @@ func (s *migrationService) ExecuteMigration(ctx context.Context, dbID, id, userI
 	checksum := ComputeChecksum(m.SQLText)
 	res, execErr := executor.Execute(ctx, conn, m.SQLText)
 	if execErr != nil {
+		diag := DiagnoseError(execErr, nil, engine)
+		slog.ErrorContext(ctx, "migration execution failed",
+			"migration_id", m.ID,
+			"db_id", m.DBID,
+			"sqlstate", diag.SQLState,
+			"error_code", diag.ErrorCode,
+			"category", diag.Category,
+			"rollback_status", diag.RollbackStatus,
+		)
 		errMsg := execErr.Error()
 		updatedM, recordErr := reservation.Complete(ctx, StatusFailed, userID, &errMsg, checksum)
 		if recordErr != nil {

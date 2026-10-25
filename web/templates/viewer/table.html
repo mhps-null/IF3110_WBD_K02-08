@@ -35,7 +35,7 @@
   <div class="table-wrapper"><table class="data-table">
     <thead><tr><th>Nama</th><th>Metode</th><th>Kolom / ekspresi key</th><th>Keunikan</th></tr></thead>
     <tbody>{{range .Data.Table.Indexes}}
-      <tr><td><strong>{{.Name}}</strong></td><td class="mono">{{.Method}}</td><td class="mono">{{range $i, $col := .Columns}}{{if $i}}, {{end}}{{$col}}{{end}}</td><td>{{if .Unique}}<span class="badge badge-unique">UNIQUE</span>{{else}}<span class="muted">Non-unique</span>{{end}}</td></tr>
+      <tr><td><strong>{{.Name}}</strong></td><td class="mono">{{.Method}}</td><td class="mono">{{range $i, $col := .Columns}}{{if $i}}, {{end}}{{$col}}{{end}}</td><td>{{if .Unique}}<span class="badge badge-unique">UNIQUE</span>{{else}}<span class="badge badge-neutral">NON-UNIQUE</span>{{end}}</td></tr>
     {{else}}<tr><td colspan="4" class="empty-cell">Tidak ada index yang ditemukan.</td></tr>{{end}}</tbody>
   </table></div>
 </section>

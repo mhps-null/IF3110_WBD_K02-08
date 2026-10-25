@@ -239,13 +239,19 @@ func (h *Handler) MigrationDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var diag *ErrorDiagnostic
+	if m.ErrorMessage != nil && *m.ErrorMessage != "" {
+		diag = DiagnoseError(nil, m.ErrorMessage, "")
+	}
+
 	pageData := contract.PageData{
 		Principal: principal,
 		CSRFToken: csrf,
 		Flash:     flash,
 		Data: map[string]any{
-			"DBID":      dbID,
-			"Migration": m,
+			"DBID":       dbID,
+			"Migration":  m,
+			"Diagnostic": diag,
 		},
 	}
 
@@ -329,6 +335,13 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 			*updatedM.Version, res.Duration, res.RowsAffected)
 	}
 
+	var diag *ErrorDiagnostic
+	if execErr != nil {
+		diag = DiagnoseError(execErr, nil, "")
+	} else if updatedM != nil && updatedM.ErrorMessage != nil && *updatedM.ErrorMessage != "" {
+		diag = DiagnoseError(nil, updatedM.ErrorMessage, "")
+	}
+
 	pageData := contract.PageData{
 		Principal: principal,
 		CSRFToken: csrf,
@@ -338,6 +351,7 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 			"Migration":  updatedM,
 			"ExecResult": res,
 			"ExecError":  execErr,
+			"Diagnostic": diag,
 		},
 	}
 

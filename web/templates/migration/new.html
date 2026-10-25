@@ -1,11 +1,11 @@
 {{define "content"}}
 <header class="page-header">
   <div class="page-header-main">
-    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Beranda</a><span aria-hidden="true">/</span><a href="/databases">Database</a><span aria-hidden="true">/</span><a href="/databases/{{.Data.DBID}}/migrations">Riwayat migration</a><span aria-hidden="true">/</span><span aria-current="page">Draft baru</span></nav>
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Beranda</a><span aria-hidden="true">/</span><a href="/databases">Database</a><span aria-hidden="true">/</span><a href="/databases/{{.Data.DBID}}/schema">Database #{{.Data.DBID}}</a><span aria-hidden="true">/</span><span aria-current="page">Buat migration</span></nav>
     <p class="eyebrow">Perubahan database</p><h1>Buat draft migration</h1>
     <p class="page-description">Tulis SQL, simpan sebagai draft, lalu tinjau dan analisis execution plan sebelum eksekusi.</p>
   </div>
-  <div class="page-header-actions"><a class="button" href="/databases/{{.Data.DBID}}/migrations">Batal</a></div>
+  <div class="page-header-actions"><a class="button" href="/databases/{{.Data.DBID}}/schema">Batal</a></div>
 </header>
 
 <section class="panel">
@@ -18,7 +18,7 @@
       <li>Perilaku transaksi bergantung pada database engine. DDL pada MySQL/MariaDB tertentu dapat menyebabkan <em>implicit commit</em> dan tidak selalu dapat dibatalkan dengan rollback.</li>
       <li>Gunakan fitur EXPLAIN untuk meninjau execution plan jika tersedia. EXPLAIN ANALYZE dapat benar-benar menjalankan query.</li>
     </ul></aside>
-    <div class="form-actions form-actions-spread"><button type="submit" class="primary">Simpan sebagai draft</button><a class="button" href="/databases/{{.Data.DBID}}/migrations">Batal</a></div>
+    <div class="form-actions form-actions-spread"><button type="submit" class="primary">Simpan sebagai draft</button><a class="button" href="/databases/{{.Data.DBID}}/schema">Batal</a></div>
   </form>
 </section>
 {{end}}

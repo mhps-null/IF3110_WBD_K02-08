@@ -11,6 +11,59 @@
 
 {{if .Data.Migration.ErrorMessage}}
 <div class="notice notice-danger mb-1" role="status"><strong>Eksekusi migration mengalami kegagalan.</strong><p class="mb-0">Detail teknis disimpan pada metadata internal dan tidak ditampilkan pada halaman ini. Periksa kondisi database target dan riwayat sebelum mencoba menjalankan ulang.</p></div>
+
+{{with .Data.Migration.Diagnostic}}
+<section class="panel panel-danger mb-1" aria-label="Diagnostik kegagalan migration">
+  <div class="panel-header">
+    <div>
+      <h2>Diagnostik Kegagalan</h2>
+      <p>Analisis penyebab umum, rekomendasi perbaikan, dan status transaksi database target.</p>
+    </div>
+    <span class="badge badge-failed">{{.Category}}</span>
+  </div>
+
+  <div class="stat-grid mb-1">
+    <div class="metric-card">
+      <span class="metric-label">Penyebab Teridentifikasi</span>
+      <p class="mb-0 mt-1" style="font-size: .88rem; line-height: 1.45;">{{.CauseMessage}}</p>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Tindakan yang Disarankan</span>
+      <p class="mb-0 mt-1" style="font-size: .88rem; line-height: 1.45;">{{.Suggestion}}</p>
+    </div>
+  </div>
+
+  <div class="panel-subtle" style="border-radius: var(--radius-sm); padding: 1rem;">
+    <h3 style="font-size: .95rem; margin-bottom: .75rem;">Detail Teknis yang Disanitasi</h3>
+    <dl class="audit-list">
+      <dt>Kategori</dt>
+      <dd><strong>{{.Category}}</strong></dd>
+
+      <dt>Kode SQLSTATE</dt>
+      <dd><span class="mono badge badge-neutral">{{if .SQLState}}{{.SQLState}}{{else}}—{{end}}</span></dd>
+
+      {{if .ErrorCode}}
+      <dt>Kode Error Engine</dt>
+      <dd><span class="mono">{{.ErrorCode}}</span></dd>
+      {{end}}
+
+      <dt>Nomor Pernyataan</dt>
+      <dd>Pernyataan ke-{{.StatementNumber}}</dd>
+
+      {{if .SanitizedDetail}}
+      <dt>Ringkasan Kesalahan</dt>
+      <dd class="mono" style="word-break: break-word;">{{.SanitizedDetail}}</dd>
+      {{end}}
+
+      <dt>Status Rollback Database</dt>
+      <dd>
+        <span class="badge badge-neutral">{{.RollbackStatus}}</span>
+        <small class="muted block" style="margin-top: .25rem;">{{.RollbackNote}}</small>
+      </dd>
+    </dl>
+  </div>
+</section>
+{{end}}
 {{end}}
 
 <div class="two-column-layout">
@@ -54,6 +107,9 @@
       <dl class="audit-list">
         <dt>Versi</dt><dd><strong>{{if .Data.Migration.Version}}v{{derefInt .Data.Migration.Version}}{{else}}Belum ditetapkan{{end}}</strong></dd>
         <dt>Status</dt><dd>{{if eq .Data.Migration.Status "success"}}<span class="badge badge-success">Berhasil</span>{{else if eq .Data.Migration.Status "failed"}}<span class="badge badge-failed">Gagal</span>{{else}}<span class="badge badge-draft">Draft</span>{{end}}</dd>
+        {{with .Data.Migration.Diagnostic}}
+        <dt>Status Transaksi</dt><dd><span class="badge badge-neutral">{{.RollbackStatus}}</span></dd>
+        {{end}}
         <dt>Dibuat oleh</dt><dd>{{if .Data.Migration.CreatedByName}}{{.Data.Migration.CreatedByName}}{{else}}User #{{.Data.Migration.CreatedBy}}{{end}}</dd>
         <dt>Waktu dibuat</dt><dd>{{formatTime .Data.Migration.CreatedAt}}</dd>
         <dt>Dieksekusi oleh</dt><dd>{{if .Data.Migration.ExecutedByName}}{{.Data.Migration.ExecutedByName}}{{else}}—{{end}}</dd>

@@ -35,6 +35,13 @@ func (m *Migration) IsEditable() bool {
 	return m.Status == StatusDraft
 }
 
+func (m *Migration) Diagnostic() *ErrorDiagnostic {
+	if m == nil || m.ErrorMessage == nil || *m.ErrorMessage == "" {
+		return nil
+	}
+	return DiagnoseError(nil, m.ErrorMessage, "")
+}
+
 func (m *Migration) Validate() error {
 	if strings.TrimSpace(m.Title) == "" {
 		return errors.New("judul migration tidak boleh kosong")
