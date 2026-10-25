@@ -1,160 +1,187 @@
-# IF3110 Milestone 1 — Integrated Database Management Platform
+# Tugas Besar IF3110 Milestone 1 — Integrated Database Management Platform
 
-Dokumentasi setup untuk aplikasi terintegrasi: fondasi autentikasi/session, access control, pengelolaan koneksi database, schema/data viewer, dan migration.
+Platform manajemen database terintegrasi berbasis **Go** (*Server-Side Rendering non-SPA*) dengan kontrol akses berbasis grup, database viewer, eksekusi migrasi transaksional linier, serta fitur analisis lanjutan (Multi-DBMS MySQL/MariaDB, Schema Diff, dan Query Execution Plan Analysis).
+
+---
+
+## Fitur Utama
+
+- **Autentikasi & Session**: Hash password aman (PBKDF2-SHA256 600.000 iterasi), proteksi CSRF pada seluruh mutasi, session identifier acak (CSPRNG 32-byte), rotasi session saat login dan perubahan hak akses, idle timeout (30 menit), absolute expiration (8 jam), serta grace period.
+- **Access Control Berbasis Grup**: Pemisahan jelas antara Platform Admin (kelola platform) dengan hak akses database (`View Only` vs `View + Edit`). Resolusi deterministik *Max Privilege* untuk multi-grup dan pencabutan akses instan untuk user non-aktif.
+- **Database Management & Viewer**: Enkripsi password koneksi menggunakan **AES-256-GCM**, connection pooling dengan health check, introspeksi skema lengkap (tabel, kolom dengan modifier presisi, constraint PK/FK/UK/CHECK, index), serta pembacaan data tabel terpaginasi di dalam transaksi *read-only* dengan *statement timeout*.
+- **Migration Engine**: Riwayat migrasi linier per database yang dijamin dengan *PostgreSQL advisory lock*, commit atomik jika sukses dan rollback otomatis jika gagal, immutability riwayat yang sudah dieksekusi, serta pencatatan audit trail lengkap.
+- **[BONUS] Multi-DBMS**: Dukungan penuh untuk PostgreSQL, MySQL (8.0+), dan MariaDB (10.3+).
+- **[BONUS] Schema Diff & DDL Generation**: Komparasi dua kondisi skema database, visual diff, pembuatan kandidat DDL berurutan topologis dengan penanda perubahan destruktif, dan prefill ke editor migrasi untuk ditinjau sebelum eksekusi.
+- **[BONUS] Query Execution Plan Analysis**: Tampilan pohon hasil `EXPLAIN` dan `EXPLAIN ANALYZE` (scan type, index usage, join strategy, total cost, actual time, actual rows) dengan jaminan rollback transaksi pada statement DML.
+
+---
 
 ## Prasyarat
 
-- Go sesuai versi yang ditentukan di `go.mod`.
-- PostgreSQL untuk metadata aplikasi.
-- `psql` untuk menerapkan migration metadata.
-- OpenSSL untuk menghasilkan secret acak (atau generator kriptografis lain yang sesuai).
+- **Go** (versi 1.24+ sesuai `go.mod`).
+- **PostgreSQL 16** (untuk metadata platform).
+- **Docker & Docker Compose** (opsional, untuk menjalankan database target pengujian otomatis).
 
-## 1. Konfigurasi
+---
 
-Buat file konfigurasi lokal:
+## 1. Konfigurasi Lingkungan
+
+Salin template environment variables:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` dan isi setidaknya:
+Edit file `.env` dan lengkapi variabel berikut:
 
-- `DATABASE_URL`: DSN PostgreSQL metadata aplikasi.
-- `SESSION_SECRET`: secret acak minimal 32 karakter.
-- `DB_ENCRYPTION_KEY`: kunci AES 32 byte untuk mengenkripsi password koneksi database.
-- `SEED_ADMIN_USERNAME`: username Platform Admin awal.
-- `SEED_ADMIN_PASSWORD`: password awal minimal 14 karakter dan bukan password placeholder.
+```dotenv
+APP_ENV=development
+ADDR=:8080
+DATABASE_URL=postgres://user:password@localhost:5432/if3110_wbd_k02_08?sslmode=disable
+TEST_DATABASE_URL=postgres://user:password@localhost:5432/if3110_wbd_k02_08_test?sslmode=disable
+SESSION_COOKIE_SECURE=false
 
-Untuk lingkungan lokal melalui HTTP, `APP_ENV=development` dan `SESSION_COOKIE_SECURE=false` dapat digunakan. Dalam produksi, aplikasi mensyaratkan `APP_ENV=production` dan `SESSION_COOKIE_SECURE=true`, serta harus berjalan di belakang terminasi TLS yang benar.
+# Hasilkan nilai acak dengan openssl
+SESSION_SECRET=$(openssl rand -hex 32)
+DB_ENCRYPTION_KEY=$(openssl rand -base64 32)
 
-Buat secret dengan:
-
-```bash
-openssl rand -hex 32
+SEED_ADMIN_USERNAME=admin
+SEED_ADMIN_PASSWORD=1234567891011121314
 ```
 
-Masukkan hasil perintah tersebut sebagai nilai `SESSION_SECRET` di `.env`. Untuk `DB_ENCRYPTION_KEY`, hasilkan nilai Base64 32 byte dengan:
+> **Catatan Keamanan**: Nilai `DB_ENCRYPTION_KEY` wajib dijaga konsistensinya karena digunakan untuk mengenkripsi dan mendekripsi password koneksi database target. Pada lingkungan produksi, aktifkan `APP_ENV=production` dan `SESSION_COOKIE_SECURE=true`.
 
-```bash
-openssl rand -base64 32
-```
-
-Simpan nilai `DB_ENCRYPTION_KEY` secara aman dan pertahankan nilainya selama password koneksi tersimpan di metadata; mengganti atau kehilangan kunci dapat membuat password koneksi lama tidak dapat didekripsi. Jangan commit `.env` atau membagikan isi konfigurasi yang mengandung kredensial.
-
-Muat environment variables ke shell:
+Muat environment variables ke shell aktif:
 
 ```bash
 set -a
-source ./.env
+source .env
 set +a
 ```
 
-## 2. Migration metadata
+---
 
-Untuk database metadata baru atau database yang belum memiliki skema, terapkan migration secara berurutan:
+## 2. Migrasi Database Metadata
+
+Terapkan skema metadata aplikasi ke database PostgreSQL:
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/001_initial_schema.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/002_session_privilege_version.sql
 ```
 
-Jangan menerapkan ulang migration awal pada database yang sudah memiliki skema tanpa memeriksa keadaan database terlebih dahulu. Migration `002` menambahkan snapshot versi privilege yang digunakan untuk validasi dan rotasi session.
+---
 
-Rincian lifecycle session dan kontrak integrasi privilege tersedia di `docs/auth-session.md` dan `docs/p1-integration-notes.md`.
+## 3. Seed Platform Admin & Menjalankan Aplikasi
 
-## 3. Seed Platform Admin dan jalankan server
-
-Pastikan `.env` sudah dimuat ke shell, database dapat diakses, dan migration sudah diterapkan. Kemudian jalankan:
+Jalankan perintah seed untuk membuat akun Platform Admin awal, lalu jalankan HTTP server:
 
 ```bash
 go run ./cmd/seed
 go run ./cmd/server
 ```
 
-Seed membuat Platform Admin awal jika username belum ada. Jika username tersebut sudah ada, seed tidak mengubah password atau privilege akun yang sudah ada.
+Buka browser di **`http://localhost:8080`** dan login menggunakan kredensial admin yang telah dikonfigurasi.
 
-Server menggunakan alamat dari `ADDR`, dengan nilai default `:8080`. Buka `http://localhost:8080` untuk mengakses aplikasi lokal.
+---
 
-Route utama yang terdaftar pada server:
+## 4. Database Testing Cepat dengan Docker (Opsional)
 
-| Method | Route | Fungsi |
-|---|---|---|
-| `GET` | `/healthz` | Health check |
-| `GET`, `POST` | `/login` | Halaman dan proses login |
-| `GET` | `/` | Beranda dengan autentikasi |
-| `POST` | `/logout` | Logout dengan autentikasi dan CSRF |
-| `GET`, `POST` | `/admin/connections` | Daftar dan tambah profil koneksi (Platform Admin) |
-| `GET` | `/databases` | Daftar database yang dapat diakses pengguna |
-| `GET` | `/databases/{id}/schema` | Lihat schema database |
-| `GET`, `POST` | `/databases/{id}/schema-diff` | Bandingkan schema dari dua database yang diizinkan dengan DBMS yang sama |
-| `GET` | `/databases/{id}/tables/{table}` | Lihat detail kolom tabel |
-| `GET` | `/databases/{id}/tables/{table}/data` | Lihat data tabel secara paginasi |
-| `GET`, `POST` | `/databases/{id}/migrations` | Riwayat dan pembuatan draft migration |
-| `GET` | `/databases/{id}/migrations/{mid}` | Detail migration |
-| `POST` | `/databases/{id}/migrations/{mid}/execute` | Eksekusi draft migration |
-| `POST` | `/databases/{id}/migrations/{mid}/explain` | Analisis execution plan |
-
-Semua route berbasis database tetap melewati autentikasi dan guard akses database.
-
-## 4. Verifikasi unit test dan build
-
-Jalankan dari root repo:
+Tersedia lingkungan Docker mandiri yang menyediakan database target PostgreSQL, MySQL, dan MariaDB dengan skema dan data terisi (*pre-seeded*):
 
 ```bash
-go test ./...
+# 1. Jalankan container database testing (Port Postgres: 5433, MySQL: 3307, MariaDB: 3308)
+./docker/start-test-dbs.sh
+
+# 2. Otomatis daftarkan koneksi dan aktifkan akses ke web platform
+./docker/register-connections.sh
+```
+
+Setelah dijalankan, buka **`http://localhost:8080/databases`** untuk langsung menguji viewer, migrasi, perbandingan skema (Schema Diff), dan query plan (EXPLAIN).
+
+Untuk menghentikan container:
+```bash
+./docker/stop-test-dbs.sh
+```
+
+Panduan skenario pengujian manual tersedia di [`docker/README_DOCKER_TESTING.md`](docker/README_DOCKER_TESTING.md).
+
+---
+
+## 5. Rute Utama Server
+
+| Method | Route | Hak Akses Minimal | Keterangan |
+|---|---|---|---|
+| `GET` | `/healthz` | Publik | Health check endpoint |
+| `GET`, `POST` | `/login` | Publik | Halaman dan proses autentikasi |
+| `POST` | `/logout` | Login | Terminasi sesi dan pembatalan cookie |
+| `GET` | `/` | Login | Beranda aplikasi |
+| `GET` | `/databases` | Login | Daftar database yang dapat diakses pengguna |
+| `GET` | `/databases/{id}/schema` | View Only | Introspeksi skema, tabel, constraint, dan index |
+| `GET` | `/databases/{id}/tables/{table}` | View Only | Detail kolom dan constraint tabel |
+| `GET` | `/databases/{id}/tables/{table}/data` | View Only | Data baris tabel (paginasi & sorting aman) |
+| `GET`, `POST` | `/databases/{id}/schema-diff` | View Only | Komparasi skema dan pembuatan kandidat DDL |
+| `GET` | `/databases/{id}/migrations` | View Only | Riwayat linier migrasi |
+| `GET` | `/databases/{id}/migrations/{mid}` | View Only | Detail audit migrasi |
+| `GET`, `POST` | `/databases/{id}/migrations/new` | View + Edit | Form dan pembuatan draft migrasi baru |
+| `POST` | `/databases/{id}/migrations/{mid}` | View + Edit | Perubahan draft migrasi yang belum dieksekusi |
+| `POST` | `/databases/{id}/migrations/{mid}/execute` | View + Edit | Eksekusi transaksional migrasi |
+| `POST` | `/databases/{id}/migrations/{mid}/explain` | View + Edit | Analisis query plan (EXPLAIN & ANALYZE) |
+| `GET`, `POST` | `/admin/connections` | Platform Admin | Kelola profil koneksi database target |
+| `GET`, `POST` | `/admin/groups` | Platform Admin | Kelola kelompok pengguna dan anggota |
+| `GET`, `POST` | `/admin/access` | Platform Admin | Matriks pemberian hak akses grup ke database |
+| `GET`, `POST` | `/admin/users` | Platform Admin | Kelola akun pengguna, reset password, & status aktif |
+
+---
+
+## 6. Pengujian Otomatis (Automated Testing)
+
+### Unit Tests & Static Check
+Jalankan pemeriksaan kode dan unit test secara terisolasi dengan *race detector*:
+
+```bash
 go vet ./...
-go build ./...
+go test -race -count=1 ./...
 ```
 
-## 5. Integration test
-
-Integration test autentikasi, session, dan CSRF tersedia melalui build tag `integration`.
-
-Gunakan database PostgreSQL khusus pengujian melalui `TEST_DATABASE_URL`. **Jangan gunakan database development atau database produksi sebagai database test**, karena test membuat dan menghapus data pengguna.
-
-Isi `TEST_DATABASE_URL` di `.env` dengan DSN yang menunjuk ke database pengujian terpisah. Muat ulang environment variables:
+### Integration Tests
+Siapkan database pengujian terpisah dan jalankan suite integrasi:
 
 ```bash
-set -a
-source ./.env
-set +a
-```
-
-Pada database test yang belum memiliki skema, terapkan migration yang sama:
-
-```bash
+# Terapkan skema pada database pengujian
 psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/001_initial_schema.sql
 psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/002_session_privilege_version.sql
+
+# Jalankan seluruh test integrasi (memerlukan TEST_METADATA_DSN)
+TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
 ```
 
-Jalankan integration test:
+---
 
-```bash
-go test -tags=integration -v ./internal/auth ./internal/session ./internal/web
+## 7. Struktur Repositori
+
+```text
+├── cmd/
+│   ├── seed/             # Seeding Platform Admin awal
+│   └── server/           # Composition root dan server HTTP
+├── docker/               # Lingkungan Docker database testing & skrip helper
+├── docs/                 # Dokumentasi keputusan arsitektur & keamanan
+├── internal/
+│   ├── access/           # Matriks izin, guards, dan effective level checker
+│   ├── admin/            # Manajemen user, group, koneksi, dan akses
+│   ├── auth/             # Autentikasi, login/logout, dan middleware auth
+│   ├── config/           # Validasi environment variables
+│   ├── connections/      # Pengelolaan koneksi target & enkripsi AES-256-GCM
+│   ├── contract/         # Antarmuka, tipe data bersama, dan contracts
+│   ├── dbdriver/         # Driver Postgres & MySQL/MariaDB (introspeksi, query data, exec)
+│   ├── explain/          # Parser execution plan EXPLAIN / ANALYZE
+│   ├── migration/        # Repository, service eksekusi transaksional, & handler
+│   ├── password/         # Hashing & verifikasi password PBKDF2-SHA256
+│   ├── schemadiff/       # Komparasi snapshot skema & generator DDL
+│   ├── session/          # Store session PostgreSQL, rotasi, & grace period
+│   └── web/              # Renderer template, CSRF, flash message, & security headers
+├── migrations_meta/      # SQL migration untuk database metadata platform
+└── web/
+    ├── static/           # Asset CSS dan JavaScript vanilla (non-SPA)
+    └── templates/        # Template HTML Go (SSR)
 ```
-
-Pastikan kedua test yang memerlukan database, yaitu `TestAuthSessionIntegration` dan `TestRevokeAllForUserIntegration`, benar-benar berjalan dan tidak berstatus `SKIP`.
-
-## 6. Cakupan P1
-
-- `cmd/server/`: composition root dan HTTP server.
-- `cmd/seed/`: seed Platform Admin awal.
-- `internal/config/`: validasi konfigurasi lingkungan.
-- `internal/password/`: hashing dan verifikasi password.
-- `internal/session/`: store PostgreSQL, expiry, rotasi, grace period, dan revokasi session.
-- `internal/auth/`: login, logout, autentikasi middleware, dan penanganan error.
-- `internal/web/`: renderer, CSRF, flash message, logging, dan security headers.
-- `internal/contract/`: kontrak identitas, session, dan data halaman.
-- `web/templates/` dan `web/static/`: template HTML dan CSS.
-- `docs/auth-session.md`: dokumentasi lifecycle session.
-
-Cakupan implementasi P1 ini belum mencakup seluruh modul akses database, koneksi database target, database viewer, administrasi user/group, dan migration executor yang menjadi bagian pekerjaan P2, P3, dan P4.
-
-## 7. Keamanan konfigurasi
-
-- Jangan commit `.env`, kredensial database, atau secret aplikasi.
-- Gunakan database khusus untuk integration test.
-- Password dan Session ID tidak boleh dicatat ke log.
-- Cookie session menggunakan `HttpOnly` dan `SameSite=Lax`, serta `Secure` sesuai konfigurasi.
-- Pesan flash ditandatangani, tetapi tidak dienkripsi. Isinya dapat dibaca client; gunakan hanya pesan teks tetap yang tidak sensitif.
-- Pada produksi, aktifkan `SESSION_COOKIE_SECURE=true` dan gunakan HTTPS.

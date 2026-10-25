@@ -1,0 +1,57 @@
+services:
+  test-postgres:
+    image: postgres:16-alpine
+    container_name: if3110-test-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: test_ecommerce_pg
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_ecommerce_pg"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  test-mysql:
+    image: mysql:8.0
+    container_name: if3110-test-mysql
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: test_inventory_mysql
+      MYSQL_USER: test_user
+      MYSQL_PASSWORD: test_password
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "test_user", "-ptest_password"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  test-mariadb:
+    image: mariadb:11.4
+    container_name: if3110-test-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: root_password
+      MARIADB_DATABASE: test_hr_mariadb
+      MARIADB_USER: test_user
+      MARIADB_PASSWORD: test_password
+    ports:
+      - "3308:3306"
+    volumes:
+      - ./mariadb-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

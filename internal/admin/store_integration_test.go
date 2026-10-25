@@ -189,11 +189,14 @@ func TestStore_Groups(t *testing.T) {
 	t.Run("list sorted", func(t *testing.T) {
 		s.CreateGroup(ctx, "ops", "operations")
 		gs, _ := s.ListGroups(ctx)
-		if len(gs) != 2 {
-			t.Fatalf("want 2 groups, got %d", len(gs))
+		if len(gs) != 5 {
+			t.Fatalf("want 5 groups, got %d", len(gs))
 		}
-		if gs[0].Name != "dev" || gs[1].Name != "ops" {
-			t.Fatalf("want [dev, ops], got [%s, %s]", gs[0].Name, gs[1].Name)
+		expected := []string{"dev", "marketing", "ops", "qa-lead", "sales"}
+		for i, exp := range expected {
+			if gs[i].Name != exp {
+				t.Fatalf("at index %d: want %s, got %s", i, exp, gs[i].Name)
+			}
 		}
 	})
 
