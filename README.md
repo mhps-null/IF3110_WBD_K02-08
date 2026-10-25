@@ -2,7 +2,9 @@
 
 > Tugas Besar IF3110 Web-Based Development Milestone 1
 
-<img width="1920" height="1080" alt="preview" src="./docs/preview.png" />
+<p align="center">
+  <img src="preview.png" width="60%"/>
+</p>
 
 Platform manajemen database terintegrasi berbasis **Go** (*Server-Side Rendering non-SPA*) dengan kontrol akses berbasis grup, database viewer, eksekusi migrasi transaksional linier, serta fitur analisis lanjutan (Multi-DBMS MySQL/MariaDB, Schema Diff, dan Query Execution Plan Analysis).
 
