@@ -39,6 +39,7 @@ func (h *Handler) Routes(mux *http.ServeMux, authenticate, adminGuard func(http.
 	mux.Handle("POST /admin/users/{id}/deactivate", w(h.DeactivateUser))
 	mux.Handle("POST /admin/users/{id}/activate", w(h.ActivateUser))
 	mux.Handle("POST /admin/users/{id}/reset-password", w(h.ResetPassword))
+	mux.Handle("POST /admin/users/{id}/toggle-admin", w(h.ToggleAdmin))
 
 	// Groups
 	mux.Handle("GET /admin/groups", w(h.ListGroups))
