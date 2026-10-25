@@ -12,6 +12,7 @@
     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><input type="hidden" name="group_id" value="{{.Group.ID}}">
     <div class="matrix-group"><span class="eyebrow">Group</span><strong>{{.Group.Name}}</strong></div>
     <div class="matrix-cells">
+      {{if .Cells}}
       {{range .Cells}}
       <div class="matrix-cell"><fieldset>
         <legend>{{.DBName}}</legend>
@@ -22,8 +23,17 @@
         </div>
       </fieldset></div>
       {{end}}
+      {{else}}
+      <p class="muted">Belum ada database yang terdaftar. Tambahkan koneksi database terlebih dahulu agar hak akses dapat diatur.</p>
+      {{end}}
     </div>
-    <div class="matrix-actions"><button type="submit" class="primary">Simpan akses {{.Group.Name}}</button></div>
+    <div class="matrix-actions">
+      {{if .Cells}}
+      <button type="submit" class="primary">Simpan akses {{.Group.Name}}</button>
+      {{else}}
+      <a class="button btn-sm primary" href="/admin/connections">Tambah koneksi</a>
+      {{end}}
+    </div>
   </form>
   {{end}}
 </div>
