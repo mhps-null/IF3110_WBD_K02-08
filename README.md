@@ -1,4 +1,8 @@
-# Tugas Besar IF3110 Milestone 1 — Integrated Database Management Platform
+# Integrated Database Management Platform
+
+> Tugas Besar IF3110 Web-Based Development Milestone 1
+
+<img width="1920" height="1080" alt="preview" src="./docs/preview.png" />
 
 Platform manajemen database terintegrasi berbasis **Go** (*Server-Side Rendering non-SPA*) dengan kontrol akses berbasis grup, database viewer, eksekusi migrasi transaksional linier, serta fitur analisis lanjutan (Multi-DBMS MySQL/MariaDB, Schema Diff, dan Query Execution Plan Analysis).
 
@@ -20,7 +24,7 @@ Platform manajemen database terintegrasi berbasis **Go** (*Server-Side Rendering
 
 - **Go** (versi 1.24+ sesuai `go.mod`).
 - **PostgreSQL 16** (untuk metadata platform).
-- **Docker & Docker Compose** (opsional, untuk menjalankan database target pengujian otomatis).
+- **Docker & Docker Compose** (opsional, untuk menjalankan database target otomatis).
 
 ---
 
