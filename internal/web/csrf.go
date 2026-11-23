@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -48,16 +49,19 @@ func (m *CSRFMiddleware) Wrap(next http.Handler) http.Handler {
 				maxBytes = 1 << 20
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "Permintaan tidak valid.", http.StatusBadRequest)
-				return
-			}
 			supplied := r.Header.Get("X-CSRF-Token")
 			if supplied == "" {
-				supplied = r.FormValue("csrf_token")
+				ct := strings.ToLower(r.Header.Get("Content-Type"))
+				if !strings.HasPrefix(ct, "application/json") {
+					if err := r.ParseForm(); err != nil {
+						writeCSRFError(w, r, http.StatusBadRequest, "Permintaan tidak valid.")
+						return
+					}
+					supplied = r.FormValue("csrf_token")
+				}
 			}
 			if !m.valid(token) || !m.valid(supplied) || subtle.ConstantTimeCompare([]byte(token), []byte(supplied)) != 1 {
-				http.Error(w, "Permintaan ditolak.", http.StatusForbidden)
+				writeCSRFError(w, r, http.StatusForbidden, "Permintaan ditolak.")
 				return
 			}
 		}
@@ -100,4 +104,14 @@ func (m *CSRFMiddleware) valid(token string) bool {
 func CSRFTokenFromRequest(r *http.Request) string {
 	token, _ := contract.CSRFTokenFrom(r.Context())
 	return token
+}
+
+func writeCSRFError(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	if strings.HasPrefix(r.URL.Path, "/api/") || strings.Contains(strings.ToLower(r.Header.Get("Accept")), "application/json") {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+		return
+	}
+	http.Error(w, msg, status)
 }

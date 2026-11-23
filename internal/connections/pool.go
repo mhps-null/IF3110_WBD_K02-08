@@ -4,16 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
 )
 
 type cachedPool struct {
 	db         *sql.DB
+	dbName     string
 	engine     contract.Engine
 	generation uint64
 }
@@ -22,10 +25,51 @@ type cachedPool struct {
 type PoolManager struct {
 	repo         Repository
 	driverName   string
+	metrics      observability.MetricsRecorder
 	mu           sync.RWMutex
 	pools        map[int64]*cachedPool
 	invalidation map[int64]uint64
 	closed       bool
+}
+
+var _ contract.PoolStatsProvider = (*PoolManager)(nil)
+
+func (p *PoolManager) SetMetrics(m observability.MetricsRecorder) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.metrics = m
+}
+
+// PoolStats snapshots live connection pool telemetry for all open target pools
+// and syncs active/idle gauges to the configured observability MetricsRecorder.
+func (p *PoolManager) PoolStats() []contract.PoolStat {
+	p.mu.RLock()
+	metrics := p.metrics
+	out := make([]contract.PoolStat, 0, len(p.pools))
+	for id, cp := range p.pools {
+		st := cp.db.Stats()
+		name := cp.dbName
+		if name == "" {
+			name = fmt.Sprintf("db-%d", id)
+		}
+		out = append(out, contract.PoolStat{
+			DBID:         id,
+			DBName:       name,
+			Engine:       cp.engine,
+			OpenConns:    st.OpenConnections,
+			InUse:        st.InUse,
+			Idle:         st.Idle,
+			WaitCount:    st.WaitCount,
+			WaitDuration: st.WaitDuration,
+		})
+		if metrics != nil {
+			metrics.SetPoolConns(name, st.InUse, st.Idle)
+		}
+	}
+	p.mu.RUnlock()
+
+	sort.Slice(out, func(i, j int) bool { return out[i].DBID < out[j].DBID })
+	return out
 }
 
 func resolveDriver(override string, engine contract.Engine) string {
@@ -112,8 +156,13 @@ func (p *PoolManager) Open(ctx context.Context, dbID int64) (*sql.DB, contract.E
 
 	p.pools[dbID] = &cachedPool{
 		db:         targetDB,
+		dbName:     conn.Name,
 		engine:     conn.Engine,
 		generation: expectedGen,
+	}
+	if p.metrics != nil {
+		st := targetDB.Stats()
+		p.metrics.SetPoolConns(conn.Name, st.InUse, st.Idle)
 	}
 
 	return targetDB, conn.Engine, nil

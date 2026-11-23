@@ -5,14 +5,21 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/audit"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
 )
 
 type Handler struct {
-	store    *Store
-	revoker  contract.SessionRevoker
-	renderer Renderer
-	logger   *slog.Logger
+	store          *Store
+	apiStore       AdminStore
+	revoker        contract.SessionRevoker
+	renderer       Renderer
+	logger         *slog.Logger
+	auditStore     audit.Store
+	obsLogger      *observability.Logger
+	groupInspector contract.GroupAccessInspector
+	accessChecker  contract.AccessChecker
 }
 
 func NewHandler(store *Store, revoker contract.SessionRevoker, renderer Renderer, logger *slog.Logger) *Handler {
@@ -24,7 +31,27 @@ func NewHandler(store *Store, revoker contract.SessionRevoker, renderer Renderer
 		logger = slog.Default()
 	}
 
-	return &Handler{store: store, revoker: revoker, renderer: renderer, logger: logger}
+	var apiStore AdminStore
+	if store != nil {
+		apiStore = store
+	}
+	return &Handler{store: store, apiStore: apiStore, revoker: revoker, renderer: renderer, logger: logger}
+}
+
+func (h *Handler) SetAuditStore(store audit.Store) {
+	h.auditStore = store
+}
+
+func (h *Handler) SetObservabilityLogger(logger *observability.Logger) {
+	h.obsLogger = logger
+}
+
+func (h *Handler) SetGroupInspector(inspector contract.GroupAccessInspector) {
+	h.groupInspector = inspector
+}
+
+func (h *Handler) SetAccessChecker(checker contract.AccessChecker) {
+	h.accessChecker = checker
 }
 
 // routes mendaftarkan route admin

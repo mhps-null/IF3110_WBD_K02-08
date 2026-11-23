@@ -15,7 +15,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		header.Set("Referrer-Policy", "no-referrer")
 		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		header.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:")
-		if !strings.HasPrefix(r.URL.Path, "/static/") {
+		if !strings.HasPrefix(r.URL.Path, "/static/") && !strings.HasPrefix(r.URL.Path, "/assets/") {
 			header.Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)

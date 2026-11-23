@@ -14,6 +14,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/access"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/admin"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/audit"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/auth"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/config"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/connections"
@@ -21,14 +22,18 @@ import (
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/dbdriver/mysql"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/dbdriver/postgres"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/migration"
-	"github.com/mhps-null/IF3110_WBD_K02-08/internal/schemadiff"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/session"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/viewer"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/web"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	obsLogger := observability.NewLogger(os.Stdout, slog.LevelInfo)
+	logger := obsLogger.Slog()
+	tracer := observability.NewTracer("api", observability.NewConsoleSpanExporter(os.Stderr))
+	metrics := observability.NewInMemoryMetrics()
+
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Error("invalid application configuration", "reason", err.Error())
@@ -54,25 +59,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	renderer, err := web.NewRenderer("web/templates")
-	if err != nil {
-		logger.Error("cannot initialize HTML templates")
-		os.Exit(1)
-	}
 	cfgSession := session.DefaultConfig()
 	sessions := session.NewSQLStore(db, cfgSession)
-	flashManager, err := web.NewFlashManager(cfg.SessionSecret, cfg.SessionCookieSecure)
-	if err != nil {
-		logger.Error("cannot initialize flash message manager")
-		os.Exit(1)
-	}
-	authHandler := auth.NewHandler(auth.NewSQLUsers(db), sessions, renderer, cfg.SessionCookieSecure, cfgSession, logger, flashManager)
+	auditStore := audit.NewSQLStore(db, obsLogger)
 
 	mux := http.NewServeMux()
 	checker := access.NewChecker(db)
 	guards := access.NewGuards(access.GuardsConfig{Checker: checker})
+
+	authHandler := auth.NewHandler(auth.NewSQLUsers(db), sessions, nil, cfg.SessionCookieSecure, cfgSession, logger)
+	authHandler.SetAccessChecker(checker)
+	authHandler.SetGroupInspector(checker)
+	authHandler.SetAuditStore(auditStore)
+	authHandler.SetObservabilityLogger(obsLogger)
+	authHandler.RegisterAPIRoutes(mux)
+
 	adminHandler := admin.NewHandler(admin.NewStore(db), sessions, nil, logger)
-	adminHandler.Routes(mux, authHandler.Authenticate, guards.Admin)
+	adminHandler.SetAuditStore(auditStore)
+	adminHandler.SetObservabilityLogger(obsLogger)
+	adminHandler.SetGroupInspector(checker)
+	adminHandler.SetAccessChecker(checker)
+	adminHandler.RegisterAPIRoutes(mux, authHandler.Authenticate, guards.Admin)
 
 	// Database connection passwords are encrypted at rest. Refuse startup rather
 	// than silently store or interpret credentials without the configured key.
@@ -87,56 +94,54 @@ func main() {
 		os.Exit(1)
 	}
 	poolManager := connections.NewPoolManager(connectionRepo, "")
+	poolManager.SetMetrics(metrics)
 	defer func() {
 		if err := poolManager.CloseAll(); err != nil {
 			logger.Error("failed to close database connection pools")
 		}
 	}()
 
-	connectionHandler := connections.NewHandler(connectionRepo, poolManager, admin.NewTemplateRenderer("web/templates"), guards)
-	connectionHandler.RegisterRoutesWithAuth(mux, authHandler.Authenticate)
+	connectionHandler := connections.NewHandler(connectionRepo, poolManager, nil, guards)
+	connectionHandler.SetAuditStore(auditStore)
+	connectionHandler.SetObservabilityLogger(obsLogger)
+	connectionHandler.RegisterAPIRoutes(mux, authHandler.Authenticate)
 
 	introspectors := map[contract.Engine]contract.Introspector{
 		contract.EnginePostgres: postgres.NewIntrospector(),
 		contract.EngineMySQL:    mysql.NewIntrospector(),
 		contract.EngineMariaDB:  mysql.NewIntrospector(),
 	}
-	viewerHandler := viewer.NewMultiEngineHandler(poolManager, introspectors, checker, viewer.NewHTMLRenderer("web/templates"), guards)
-	viewerHandler.RegisterRoutesWithAuth(mux, authHandler.Authenticate)
-
-	schemaDiffHandler := schemadiff.NewHandler(
-		checker,
-		introspectors,
-		poolManager,
-		admin.NewTemplateRenderer("web/templates"),
-		logger,
-	)
-	schemaDiffHandler.Routes(mux, authHandler.Authenticate, guards.ViewDB)
+	viewerHandler := viewer.NewMultiEngineHandler(poolManager, introspectors, checker, nil, guards)
+	viewerHandler.SetObservability(obsLogger, tracer)
+	viewerHandler.RegisterAPIRoutes(mux, authHandler.Authenticate)
 
 	migrationHandler := migration.NewHandler(
 		migration.NewService(migration.NewSQLRepository(db), poolManager),
-		migration.NewHTMLRenderer("web/templates"),
+		nil,
 		guards,
 	)
-	migrationHandler.RegisterRoutesWithAuth(mux, authHandler.Authenticate)
+	migrationHandler.RegisterReadAPIRoutes(mux, authHandler.Authenticate)
+
+	auditHandler := audit.NewHandler(auditStore, guards)
+	auditHandler.RegisterRoutesWithAuth(mux, authHandler.Authenticate)
+
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	mux.HandleFunc("GET /login", authHandler.LoginPage)
-	mux.HandleFunc("POST /login", authHandler.Login)
-	mux.Handle("GET /{$}", authHandler.Authenticate(http.HandlerFunc(authHandler.RenderHome)))
-	mux.Handle("POST /logout", authHandler.Authenticate(http.HandlerFunc(authHandler.Logout)))
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+
+	// Serve built React SPA assets and client-side routes; unmatched /api/* returns JSON 404.
+	mux.Handle("/", web.NewSPAHandler(cfg.SPADistDir))
 
 	var handler http.Handler = mux
 	handler = web.NewCSRFMiddleware(cfg.SessionSecret, cfg.SessionCookieSecure).Wrap(handler)
-	handler = web.RequestLogger(logger, handler)
+	handler = observability.Middleware(tracer, obsLogger)(handler)
 	handler = web.SecurityHeaders(handler)
 
 	server := &http.Server{
-		Addr: cfg.Addr, Handler: handler,
+		Addr:              cfg.Addr,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -144,7 +149,7 @@ func main() {
 	}
 	serverErr := make(chan error, 1)
 	go func() {
-		logger.Info("server starting", "addr", cfg.Addr, "environment", cfg.Env)
+		logger.Info("server starting", "addr", cfg.Addr, "environment", cfg.Env, "spa_dist_dir", cfg.SPADistDir)
 		serverErr <- server.ListenAndServe()
 	}()
 
