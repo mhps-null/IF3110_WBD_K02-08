@@ -72,20 +72,35 @@ Terapkan skema metadata aplikasi ke database PostgreSQL:
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/001_initial_schema.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/002_session_privilege_version.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/003_audit_logs.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/004_group_leader.sql
 ```
 
 ---
 
-## 3. Seed Platform Admin & Menjalankan Aplikasi
+## 3. Build Frontend SPA, Seed Platform Admin, & Menjalankan Aplikasi
 
-Jalankan perintah seed untuk membuat akun Platform Admin awal, lalu jalankan HTTP server:
+Bangun frontend SPA React + TypeScript (`frontend/dist/` akan langsung disajikan oleh Go server), jalankan seed Platform Admin awal, lalu jalankan HTTP server:
 
 ```bash
+cd frontend && npm install && npm run build && cd ..
 go run ./cmd/seed
 go run ./cmd/server
 ```
 
+Untuk mode development frontend dengan hot-reload (proxy `/api/*` ke `:8080`):
+
+```bash
+cd frontend && npm run dev
+# Buka http://localhost:5173 (Go API tetap di :8080)
+```
+
 Buka browser di **`http://localhost:8080`** dan login menggunakan kredensial admin yang telah dikonfigurasi.
+
+Dokumentasi rinci Milestone 2:
+- **SPA, Auth/Session JSON API, Group Leader, & Viewer (Orang 1):** [`docs/m2-p1-spa-and-auth.md`](docs/m2-p1-spa-and-auth.md)
+- **Observability, Audit Log, & Dataset Pengujian Besar (Orang 2):** [`docs/m2-observability-and-dataset.md`](docs/m2-observability-and-dataset.md)
+- **[BONUS] SAST dengan GitHub CodeQL:** [`docs/codeql-sast.md`](docs/codeql-sast.md) — workflow [`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) menganalisis Go & TypeScript/React (`+security-extended`); scan awal (`1fb9fad`) menemukan 4 alert (2 High `go/sql-injection`, 2 Medium `go/log-injection`), seluruhnya telah diperbaiki pada commit `3b0bc21` dan terverifikasi **`0 Open · 4 Closed`** pada rescan.
 
 ---
 

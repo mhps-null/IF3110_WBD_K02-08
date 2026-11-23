@@ -7,9 +7,9 @@ import (
 )
 
 type Principal struct {
-	UserID          int64
-	Username        string
-	IsPlatformAdmin bool
+	UserID          int64  `json:"id"`
+	Username        string `json:"username"`
+	IsPlatformAdmin bool   `json:"is_platform_admin"`
 }
 
 type principalContextKey struct{}

@@ -1,12 +1,15 @@
 package connections
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/audit"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
 )
 
 type Renderer interface {
@@ -15,19 +18,31 @@ type Renderer interface {
 
 // Handler manages HTTP endpoints for database connection profiles.
 type Handler struct {
-	repo     Repository
-	poolMgr  *PoolManager
-	renderer Renderer
-	guards   contract.Guards
+	repo       Repository
+	poolMgr    *PoolManager
+	renderer   Renderer
+	guards     contract.Guards
+	auditStore audit.Store
+	obsLogger  *observability.Logger
+	testConnFn func(ctx context.Context, driverName string, conn *Connection, plainPassword string) error
 }
 
 func NewHandler(repo Repository, poolMgr *PoolManager, renderer Renderer, guards contract.Guards) *Handler {
 	return &Handler{
-		repo:     repo,
-		poolMgr:  poolMgr,
-		renderer: renderer,
-		guards:   guards,
+		repo:       repo,
+		poolMgr:    poolMgr,
+		renderer:   renderer,
+		guards:     guards,
+		testConnFn: TestConnection,
 	}
+}
+
+func (h *Handler) SetAuditStore(store audit.Store) {
+	h.auditStore = store
+}
+
+func (h *Handler) SetObservabilityLogger(logger *observability.Logger) {
+	h.obsLogger = logger
 }
 
 // RegisterRoutes registers connection management routes with admin authorization guards.

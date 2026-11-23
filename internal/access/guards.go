@@ -1,9 +1,11 @@
 package access
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 )
@@ -56,12 +58,12 @@ func (g *guards) admin(next http.Handler) http.Handler {
 		p, ok := contract.PrincipalFrom(r.Context())
 
 		if !ok {
-			denyUnauthenticated(w)
+			denyUnauthenticated(w, r)
 			return
 		}
 
 		if !p.IsPlatformAdmin {
-			denyForbidden(w)
+			denyForbidden(w, r)
 			return
 		}
 
@@ -81,25 +83,25 @@ func (g *guards) requireAction(next http.Handler, action Action) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := contract.PrincipalFrom(r.Context())
 		if !ok {
-			denyUnauthenticated(w)
+			denyUnauthenticated(w, r)
 			return
 		}
 
 		dbID, ok := g.dbID(r)
 		if !ok {
-			http.Error(w, "invalid database id", http.StatusBadRequest)
+			writeGuardError(w, r, http.StatusBadRequest, "invalid database id")
 			return
 		}
 
 		level, err := g.checker.EffectiveLevel(r.Context(), p.UserID, dbID)
 		if err != nil {
 			log.Printf("access: guard: effective level user=%d db=%d: %v", p.UserID, dbID, err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeGuardError(w, r, http.StatusInternalServerError, "internal error")
 			return
 		}
 
 		if !Allows(level, action) {
-			denyForbidden(w)
+			denyForbidden(w, r)
 			return
 		}
 
@@ -112,24 +114,24 @@ func (g *guards) requireDBLevel(next http.Handler, min contract.AccessLevel) htt
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := contract.PrincipalFrom(r.Context())
 		if !ok {
-			denyUnauthenticated(w)
+			denyUnauthenticated(w, r)
 			return
 		}
 
 		dbID, ok := g.dbID(r)
 		if !ok {
-			http.Error(w, "invalid database id", http.StatusBadRequest)
+			writeGuardError(w, r, http.StatusBadRequest, "invalid database id")
 			return
 		}
 
 		level, err := g.checker.EffectiveLevel(r.Context(), p.UserID, dbID)
 		if err != nil {
 			log.Printf("access: guard: effective level user=%d db=%d: %v", p.UserID, dbID, err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeGuardError(w, r, http.StatusInternalServerError, "internal error")
 			return
 		}
 		if level < min {
-			denyForbidden(w)
+			denyForbidden(w, r)
 			return
 		}
 
@@ -137,10 +139,20 @@ func (g *guards) requireDBLevel(next http.Handler, min contract.AccessLevel) htt
 	})
 }
 
-func denyUnauthenticated(w http.ResponseWriter) {
-	http.Error(w, "authentication required", http.StatusUnauthorized)
+func denyUnauthenticated(w http.ResponseWriter, r *http.Request) {
+	writeGuardError(w, r, http.StatusUnauthorized, "authentication required")
 }
 
-func denyForbidden(w http.ResponseWriter) {
-	http.Error(w, contract.ErrAccessDenied.Error(), http.StatusForbidden)
+func denyForbidden(w http.ResponseWriter, r *http.Request) {
+	writeGuardError(w, r, http.StatusForbidden, contract.ErrAccessDenied.Error())
+}
+
+func writeGuardError(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	if r != nil && strings.HasPrefix(r.URL.Path, "/api/") {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+		return
+	}
+	http.Error(w, msg, status)
 }

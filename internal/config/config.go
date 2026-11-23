@@ -13,6 +13,7 @@ type Config struct {
 	DatabaseURL         string
 	SessionSecret       []byte
 	SessionCookieSecure bool
+	SPADistDir          string
 }
 
 func Load() (Config, error) {
@@ -20,6 +21,7 @@ func Load() (Config, error) {
 		Env:         envOr("APP_ENV", "development"),
 		Addr:        envOr("ADDR", ":8080"),
 		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		SPADistDir:  envOr("SPA_DIST_DIR", "frontend/dist"),
 	}
 	secret := os.Getenv("SESSION_SECRET")
 	if len(secret) < 32 || strings.Contains(secret, "replace-with-a-random-secret") {

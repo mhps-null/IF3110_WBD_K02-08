@@ -2,13 +2,16 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/audit"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/password"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/session"
 )
@@ -26,13 +29,17 @@ type FlashStore interface {
 }
 
 type Handler struct {
-	users        UserRepository
-	sessions     session.Store
-	renderer     Renderer
-	cookieSecure bool
-	sessionCfg   session.Config
-	logger       *slog.Logger
-	flash        FlashStore
+	users          UserRepository
+	sessions       session.Store
+	renderer       Renderer
+	cookieSecure   bool
+	sessionCfg     session.Config
+	logger         *slog.Logger
+	flash          FlashStore
+	accessChecker  contract.AccessChecker
+	groupInspector contract.GroupAccessInspector
+	auditStore     audit.Store
+	obsLogger      *observability.Logger
 }
 
 func NewHandler(users UserRepository, sessions session.Store, renderer Renderer, cookieSecure bool, sessionCfg session.Config, logger *slog.Logger, flashStores ...FlashStore) *Handler {
@@ -44,6 +51,22 @@ func NewHandler(users UserRepository, sessions session.Store, renderer Renderer,
 		flash = flashStores[0]
 	}
 	return &Handler{users: users, sessions: sessions, renderer: renderer, cookieSecure: cookieSecure, sessionCfg: sessionCfg, logger: logger, flash: flash}
+}
+
+func (h *Handler) SetAccessChecker(checker contract.AccessChecker) {
+	h.accessChecker = checker
+}
+
+func (h *Handler) SetGroupInspector(inspector contract.GroupAccessInspector) {
+	h.groupInspector = inspector
+}
+
+func (h *Handler) SetAuditStore(store audit.Store) {
+	h.auditStore = store
+}
+
+func (h *Handler) SetObservabilityLogger(logger *observability.Logger) {
+	h.obsLogger = logger
 }
 
 func (h *Handler) LoginPage(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +133,7 @@ func (h *Handler) Authenticate(next http.Handler) http.Handler {
 		cookie, err := r.Cookie(sessionCookieName)
 		if err != nil || cookie.Value == "" {
 			h.clearSessionCookie(w)
-			h.redirect(w, r, "/login")
+			h.unauthenticated(w, r, "Autentikasi diperlukan. Silakan masuk terlebih dahulu.")
 			return
 		}
 		now := time.Now().UTC()
@@ -118,7 +141,7 @@ func (h *Handler) Authenticate(next http.Handler) http.Handler {
 		if err != nil {
 			if errors.Is(err, session.ErrInvalid) {
 				h.clearSessionCookie(w)
-				h.redirectWithFlash(w, r, "/login", "error", "Sesi tidak valid atau telah berakhir. Silakan masuk kembali.")
+				h.unauthenticatedWithFlash(w, r, "Sesi tidak valid atau telah berakhir. Silakan masuk kembali.")
 			} else {
 				// A metadata database failure is not proof that the session is invalid.
 				// Preserve the cookie and fail temporarily instead of forcing re-login.
@@ -156,7 +179,7 @@ func (h *Handler) Authenticate(next http.Handler) http.Handler {
 				if loadErr != nil {
 					if errors.Is(loadErr, session.ErrInvalid) {
 						h.clearSessionCookie(w)
-						h.redirectWithFlash(w, r, "/login", "error", "Sesi tidak valid atau telah berakhir. Silakan masuk kembali.")
+						h.unauthenticatedWithFlash(w, r, "Sesi tidak valid atau telah berakhir. Silakan masuk kembali.")
 					} else {
 						h.logger.Error("reload session after failed rotation")
 						h.serviceUnavailable(w, r, "Layanan sementara tidak tersedia. Silakan coba lagi.")
@@ -182,7 +205,7 @@ func (h *Handler) Authenticate(next http.Handler) http.Handler {
 		if errors.Is(err, ErrUserNotFound) || !user.IsActive {
 			_ = h.sessions.Revoke(r.Context(), cookie.Value)
 			h.clearSessionCookie(w)
-			h.redirectWithFlash(w, r, "/login", "error", "Sesi tidak valid atau telah berakhir. Silakan masuk kembali.")
+			h.unauthenticatedWithFlash(w, r, "Sesi tidak valid atau telah berakhir. Silakan masuk kembali.")
 			return
 		}
 		principal := contract.Principal{UserID: user.ID, Username: user.Username, IsPlatformAdmin: user.IsPlatformAdmin}
@@ -227,11 +250,41 @@ func (h *Handler) renderStatus(w http.ResponseWriter, _ *http.Request, status in
 }
 
 func (h *Handler) serviceUnavailable(w http.ResponseWriter, r *http.Request, message string) {
+	if isAPIRequest(r) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": message})
+		return
+	}
 	h.renderStatus(w, r, http.StatusServiceUnavailable, "error", contract.PageData{
 		CSRFToken: csrfToken(r.Context()),
 		Flash:     message,
 		FlashKind: "error",
 	})
+}
+
+func (h *Handler) unauthenticated(w http.ResponseWriter, r *http.Request, message string) {
+	if isAPIRequest(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": message})
+		return
+	}
+	h.redirect(w, r, "/login")
+}
+
+func (h *Handler) unauthenticatedWithFlash(w http.ResponseWriter, r *http.Request, message string) {
+	if isAPIRequest(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": message})
+		return
+	}
+	h.redirectWithFlash(w, r, "/login", "error", message)
+}
+
+func isAPIRequest(r *http.Request) bool {
+	return strings.HasPrefix(r.URL.Path, "/api/")
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func (h *Handler) loginFailed(w http.ResponseWriter, r *http.Request, status int) {

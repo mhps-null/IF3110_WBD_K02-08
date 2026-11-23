@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
 )
 
 // Handler manages HTTP endpoints for schema exploration and paginated table data.
@@ -17,6 +18,13 @@ type Handler struct {
 	accessChecker contract.AccessChecker
 	renderer      Renderer
 	guards        contract.Guards
+	obsLogger     *observability.Logger
+	tracer        *observability.Tracer
+}
+
+func (h *Handler) SetObservability(logger *observability.Logger, tracer *observability.Tracer) {
+	h.obsLogger = logger
+	h.tracer = tracer
 }
 
 func defaultSchemaForEngine(rawSchema string, engine contract.Engine) string {

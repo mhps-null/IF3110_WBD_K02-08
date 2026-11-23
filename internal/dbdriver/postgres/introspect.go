@@ -556,11 +556,13 @@ func (i *Introspector) Rows(ctx context.Context, db *sql.DB, schema, table strin
 		return contract.RowPage{}, fmt.Errorf("set statement timeout: %w", err)
 	}
 
-	colQuery := `SELECT att.attname
+	colQuery := `SELECT ns.nspname, cls.relname, att.attname
 		FROM pg_attribute att
 		JOIN pg_class cls ON cls.oid = att.attrelid
 		JOIN pg_namespace ns ON ns.oid = cls.relnamespace
 		WHERE ns.nspname = $1 AND cls.relname = $2
+		  AND ns.nspname NOT IN ('pg_catalog', 'information_schema')
+		  AND cls.relkind IN ('r', 'p')
 		  AND att.attnum > 0
 		  AND NOT att.attisdropped
 		ORDER BY att.attnum`
@@ -571,18 +573,23 @@ func (i *Introspector) Rows(ctx context.Context, db *sql.DB, schema, table strin
 	}
 	defer colRows.Close()
 
+	var resolvedSchema, resolvedTable string
 	validColumns := make([]string, 0)
 	for colRows.Next() {
-		var col string
-		if err := colRows.Scan(&col); err != nil {
+		var nsName, relName, col string
+		if err := colRows.Scan(&nsName, &relName, &col); err != nil {
 			return contract.RowPage{}, fmt.Errorf("scan column name: %w", err)
+		}
+		if resolvedSchema == "" {
+			resolvedSchema = nsName
+			resolvedTable = relName
 		}
 		validColumns = append(validColumns, col)
 	}
 	if err := colRows.Err(); err != nil {
 		return contract.RowPage{}, fmt.Errorf("iterate columns: %w", err)
 	}
-	if len(validColumns) == 0 {
+	if len(validColumns) == 0 || resolvedSchema == "" || resolvedTable == "" {
 		return contract.RowPage{}, contract.ErrNotFound
 	}
 
@@ -606,7 +613,8 @@ func (i *Introspector) Rows(ctx context.Context, db *sql.DB, schema, table strin
 		orderDir = "DESC"
 	}
 
-	qualifiedTable := QualifyTable(schema, table)
+	// Build identifiers strictly from catalog-resolved metadata rather than raw request input.
+	qualifiedTable := QualifyTable(resolvedSchema, resolvedTable)
 
 	var totalRows int64
 	countQuery := fmt.Sprintf(`SELECT COUNT(1) FROM %s`, qualifiedTable)

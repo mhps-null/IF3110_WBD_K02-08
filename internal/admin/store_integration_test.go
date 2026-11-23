@@ -27,6 +27,7 @@ import (
 
 const schemaPath = "../../migrations_meta/001_initial_schema.sql"
 const schemaPath2 = "../../migrations_meta/002_session_privilege_version.sql"
+const schemaPath4 = "../../migrations_meta/004_group_leader.sql"
 
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -64,6 +65,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 	applySQL(t, testDB, schemaPath)
 	applySQL(t, testDB, schemaPath2)
+	applySQL(t, testDB, schemaPath4)
 	return testDB
 }
 

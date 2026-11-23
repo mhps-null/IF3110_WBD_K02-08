@@ -17,11 +17,11 @@ var (
 )
 
 type User struct {
-	ID        int64
-	Username  string
-	IsAdmin   bool
-	IsActive  bool
-	CreatedAt time.Time
+	ID        int64     `json:"id"`
+	Username  string    `json:"username"`
+	IsAdmin   bool      `json:"is_admin"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Store struct {
@@ -134,30 +134,41 @@ func isUniqueViolation(err error) bool {
 var (
 	ErrGroupNotFound      = errors.New("group tidak ditemukan")
 	ErrDuplicateGroupName = errors.New("nama group sudah dipakai")
+	ErrLeaderNotMember    = errors.New("leader harus merupakan anggota group")
+	ErrLeaderInactive     = errors.New("leader harus merupakan user yang aktif")
 )
 
 // Tipe
 type Group struct {
-	ID          int64
-	Name        string
-	Description string
+	ID             int64   `json:"id"`
+	Name           string  `json:"name"`
+	Description    string  `json:"description"`
+	LeaderUserID   *int64  `json:"leader_user_id"`
+	LeaderUsername *string `json:"leader_username"`
+	LeaderIsActive bool    `json:"leader_is_active"`
+	HasLeader      bool    `json:"has_leader"`
+	MemberCount    int     `json:"member_count"`
 }
 
 type Database struct {
-	ID   int64
-	Name string
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 type GroupAccess struct {
-	GroupID int64
-	DBID    int64
-	Level   int // 1 = view only, 2 = view + edit
+	GroupID int64 `json:"group_id"`
+	DBID    int64 `json:"db_id"`
+	Level   int   `json:"level"` // 1 = view only, 2 = view + edit
 }
 
 // Groups
 func (s *Store) ListGroups(ctx context.Context) ([]Group, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, description FROM groups ORDER BY name`)
+		SELECT g.id, g.name, g.description, g.leader_user_id, u.username, COALESCE(u.is_active, FALSE),
+		       (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count
+		FROM groups g
+		LEFT JOIN users u ON u.id = g.leader_user_id
+		ORDER BY g.name`)
 
 	if err != nil {
 		return nil, fmt.Errorf("list groups: %w", err)
@@ -167,10 +178,23 @@ func (s *Store) ListGroups(ctx context.Context) ([]Group, error) {
 
 	var out []Group
 	for rows.Next() {
-		var g Group
-		if err := rows.Scan(&g.ID, &g.Name, &g.Description); err != nil {
+		var (
+			g              Group
+			leaderID       sql.NullInt64
+			leaderUsername sql.NullString
+		)
+		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &leaderID, &leaderUsername, &g.LeaderIsActive, &g.MemberCount); err != nil {
 			return nil, fmt.Errorf("scan group: %w", err)
 		}
+		if leaderID.Valid {
+			v := leaderID.Int64
+			g.LeaderUserID = &v
+		}
+		if leaderUsername.Valid {
+			v := leaderUsername.String
+			g.LeaderUsername = &v
+		}
+		g.HasLeader = leaderID.Valid && g.LeaderIsActive
 
 		out = append(out, g)
 	}
@@ -195,10 +219,18 @@ func (s *Store) CreateGroup(ctx context.Context, name, description string) (int6
 }
 
 func (s *Store) GetGroup(ctx context.Context, id int64) (Group, error) {
-	var g Group
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, description FROM groups WHERE id = $1`, id).
-		Scan(&g.ID, &g.Name, &g.Description)
+	var (
+		g              Group
+		leaderID       sql.NullInt64
+		leaderUsername sql.NullString
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT g.id, g.name, g.description, g.leader_user_id, u.username, COALESCE(u.is_active, FALSE),
+		       (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count
+		FROM groups g
+		LEFT JOIN users u ON u.id = g.leader_user_id
+		WHERE g.id = $1`, id).
+		Scan(&g.ID, &g.Name, &g.Description, &leaderID, &leaderUsername, &g.LeaderIsActive, &g.MemberCount)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return Group{}, ErrGroupNotFound
@@ -207,8 +239,91 @@ func (s *Store) GetGroup(ctx context.Context, id int64) (Group, error) {
 	if err != nil {
 		return Group{}, fmt.Errorf("get group: %w", err)
 	}
+	if leaderID.Valid {
+		v := leaderID.Int64
+		g.LeaderUserID = &v
+	}
+	if leaderUsername.Valid {
+		v := leaderUsername.String
+		g.LeaderUsername = &v
+	}
+	g.HasLeader = leaderID.Valid && g.LeaderIsActive
 
 	return g, nil
+}
+
+// SetGroupLeader assigns, replaces, or clears a group's leader.
+// When assigning a leader, the user must exist, be active, and belong to the group.
+// One user may lead multiple groups simultaneously. Changing a leader bumps
+// privilege_version for affected users within the same transaction.
+func (s *Store) SetGroupLeader(ctx context.Context, groupID int64, leaderUserID *int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("set group leader: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var prevLeader sql.NullInt64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT leader_user_id FROM groups WHERE id = $1 FOR UPDATE`, groupID).Scan(&prevLeader); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrGroupNotFound
+		}
+		return fmt.Errorf("set group leader: lock group: %w", err)
+	}
+
+	if leaderUserID == nil {
+		if !prevLeader.Valid {
+			return tx.Commit()
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE groups SET leader_user_id = NULL WHERE id = $1`, groupID); err != nil {
+			return fmt.Errorf("clear group leader: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET privilege_version = privilege_version + 1 WHERE id = $1`, prevLeader.Int64); err != nil {
+			return fmt.Errorf("bump previous leader privilege: %w", err)
+		}
+		return tx.Commit()
+	}
+
+	targetID := *leaderUserID
+	var active bool
+	if err := tx.QueryRowContext(ctx, `SELECT is_active FROM users WHERE id = $1`, targetID).Scan(&active); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("set group leader: check user: %w", err)
+	}
+	if !active {
+		return ErrLeaderInactive
+	}
+
+	var isMember bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2)`,
+		groupID, targetID).Scan(&isMember); err != nil {
+		return fmt.Errorf("set group leader: check membership: %w", err)
+	}
+	if !isMember {
+		return ErrLeaderNotMember
+	}
+
+	if prevLeader.Valid && prevLeader.Int64 == targetID {
+		return tx.Commit()
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE groups SET leader_user_id = $1 WHERE id = $2`, targetID, groupID); err != nil {
+		return fmt.Errorf("set group leader: update group: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET privilege_version = privilege_version + 1 WHERE id = $1`, targetID); err != nil {
+		return fmt.Errorf("bump new leader privilege: %w", err)
+	}
+	if prevLeader.Valid && prevLeader.Int64 != targetID {
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET privilege_version = privilege_version + 1 WHERE id = $1`, prevLeader.Int64); err != nil {
+			return fmt.Errorf("bump previous leader privilege: %w", err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (s *Store) UpdateGroup(ctx context.Context, id int64, name, description string) error {
@@ -338,6 +453,13 @@ func (s *Store) RemoveMember(ctx context.Context, groupID, userID int64) error {
 
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil // sudah bukan anggota
+	}
+
+	// Ensure a removed member cannot remain assigned as group leader.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE groups SET leader_user_id = NULL WHERE id = $1 AND leader_user_id = $2`,
+		groupID, userID); err != nil {
+		return fmt.Errorf("clear removed member leader: %w", err)
 	}
 
 	if _, err := tx.ExecContext(ctx,
