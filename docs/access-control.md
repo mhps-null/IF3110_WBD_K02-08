@@ -79,3 +79,10 @@ Perubahan role Platform Admin juga menaikkan `privilege_version` dan mencabut se
 Untuk akses yang ditolak karena level tidak mencukupi, response menggunakan `contract.ErrAccessDenied`.
 
 Pemeriksaan akses dilakukan di backend. UI hanya mengatur tampilan dan tidak dijadikan sebagai mekanisme utama untuk membatasi akses.
+
+## Pembaruan Milestone 2 (Group Leader & Approver Inspector)
+
+- Skema `migrations_meta/004_group_leader.sql` menambahkan kolom nullable `groups.leader_user_id` (tanpa constraint `UNIQUE`, sehingga satu user dapat menjadi leader pada beberapa group).
+- `admin.Store.SetGroupLeader` memvalidasi bahwa leader merupakan user aktif dan anggota group terkait, serta menaikkan `users.privilege_version` dalam transaksi yang sama.
+- `admin.Store.RemoveMember` otomatis mengosongkan `leader_user_id` apabila anggota yang dikeluarkan adalah leader saat ini.
+- `access.Checker` mengimplementasikan `contract.GroupAccessInspector` (`ListGroupsForDatabase`, `ListUserGroups`) dan diekspos melalui `GET /api/databases/{id}/access-groups` untuk perhitungan approver multi-group oleh modul Orang 3. Group yang memiliki akses ke database tetapi belum memiliki leader aktif ditandai dengan `has_leader: false` dan `approval_status: "pending_leader_assignment"`.

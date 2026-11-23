@@ -33,9 +33,17 @@ Terapkan migration metadata secara berurutan pada database yang belum memiliki s
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/001_initial_schema.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/002_session_privilege_version.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/003_audit_logs.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/004_group_leader.sql
 ```
 
-Migration `002` bersifat additive dan idempotent. Migration ini menambahkan `users.privilege_version` dan `sessions.privilege_version` dengan nilai awal `0`. Jangan mengubah kolom yang sudah ada dalam skema metadata yang dibekukan.
+Migration `002` bersifat additive dan idempotent. Migration ini menambahkan `users.privilege_version` dan `sessions.privilege_version` dengan nilai awal `0`. Pada Milestone 2, `003_audit_logs.sql` menambahkan tabel `audit_logs` dan `004_group_leader.sql` menambahkan `groups.leader_user_id`. Jangan mengubah kolom yang sudah ada dalam skema metadata yang dibekukan.
+
+## Pembaruan Milestone 2 (JSON API & SPA)
+
+- Seluruh endpoint autentikasi disajikan sebagai JSON API (`GET /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`) untuk dikonsumsi SPA di `frontend/`.
+- Middleware `auth.Handler.Authenticate` mengembalikan JSON `401 Unauthorized` / `503 Service Unavailable` pada rute `/api/*` dengan tetap mempertahankan aturan rotasi session, `privilege_version`, grace period, idle timeout, dan absolute expiration yang sama.
+- Middleware `web.CSRFMiddleware` menerima token CSRF melalui header `X-CSRF-Token` untuk request JSON tanpa mengonsumsi body `application/json`. Detail lengkap terdapat di `docs/m2-p1-spa-and-auth.md`.
 
 
 ## Flash message setelah redirect

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# SCRIPT PENDAFTARAN KONEKSI DATABASE DOCKER KE PLATFORM ADMIN
+# SCRIPT PENDAFTARAN KONEKSI DATABASE DOCKER KE PLATFORM ADMIN (MILESTONE 2 JSON API)
 # ==============================================================================
 set -euo pipefail
 
@@ -12,28 +12,30 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 COOKIE_JAR="$TMP_DIR/cookies.txt"
 
-echo "=== Mendaftarkan Koneksi Database Testing ke Platform Web ==="
+echo "=== Mendaftarkan Koneksi Database Testing ke Platform Web (JSON API) ==="
 
-# 1. Login sebagai Admin
-CSRF_TOKEN="$(curl -s -c "$COOKIE_JAR" "$BASE_URL/login" | grep -o 'name="csrf_token" value="[^"]*"' | head -n1 | cut -d'"' -f4)"
+# 1. Ambil CSRF token dari GET /api/auth/csrf
+CSRF_TOKEN="$(curl -s -c "$COOKIE_JAR" "$BASE_URL/api/auth/csrf" | sed -n 's/.*"csrf_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 if [[ -z "$CSRF_TOKEN" ]]; then
-    echo "ERROR: Gagal mengambil CSRF token dari $BASE_URL/login" >&2
+    echo "ERROR: Gagal mengambil CSRF token dari $BASE_URL/api/auth/csrf" >&2
     exit 1
 fi
 
+# 2. Login sebagai Platform Admin melalui POST /api/auth/login
+LOGIN_Payload="$(printf '{"username":"%s","password":"%s"}' "$ADMIN_USER" "$ADMIN_PASS")"
 LOGIN_STATUS="$(curl -s -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
-    --data-urlencode "username=$ADMIN_USER" \
-    --data-urlencode "password=$ADMIN_PASS" \
-    --data-urlencode "csrf_token=$CSRF_TOKEN" \
-    -w "%{http_code}" -o /dev/null "$BASE_URL/login")"
+    -H "Content-Type: application/json" \
+    -H "X-CSRF-Token: $CSRF_TOKEN" \
+    -d "$LOGIN_Payload" \
+    -w "%{http_code}" -o /dev/null "$BASE_URL/api/auth/login")"
 
-if [[ "$LOGIN_STATUS" != "303" && "$LOGIN_STATUS" != "200" ]]; then
-    echo "ERROR: Login gagal (HTTP $LOGIN_STATUS)" >&2
+if [[ "$LOGIN_STATUS" != "200" ]]; then
+    echo "ERROR: Login gagal (HTTP $LOGIN_STATUS). Pastikan kredensial ADMIN_USER/ADMIN_PASS sesuai." >&2
     exit 1
 fi
 echo " [OK] Berhasil login sebagai Platform Admin ($ADMIN_USER)"
 
-# Helper function to register connection
+# Helper function to register connection via POST /api/admin/connections
 register_db() {
     local name="$1"
     local engine="$2"
@@ -43,36 +45,33 @@ register_db() {
     local user="$6"
     local pass="$7"
 
-    local csrf="$(curl -s -b "$COOKIE_JAR" "$BASE_URL/admin/connections" | grep -o 'name="csrf_token" value="[^"]*"' | head -n1 | cut -d'"' -f4)"
+    local payload
+    payload="$(printf '{"name":"%s","engine":"%s","host":"%s","port":%s,"database_name":"%s","username":"%s","password":"%s","ssl_mode":"disable"}' \
+        "$name" "$engine" "$host" "$port" "$db_name" "$user" "$pass")"
 
-    local status="$(curl -s -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
-        -d "name=$name" \
-        -d "engine=$engine" \
-        -d "host=$host" \
-        -d "port=$port" \
-        -d "database_name=$db_name" \
-        -d "username=$user" \
-        -d "password=$pass" \
-        -d "sslmode=disable" \
-        --data-urlencode "csrf_token=$csrf" \
-        -w "%{http_code}" -o /dev/null "$BASE_URL/admin/connections")"
+    local status
+    status="$(curl -s -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+        -H "Content-Type: application/json" \
+        -H "X-CSRF-Token: $CSRF_TOKEN" \
+        -d "$payload" \
+        -w "%{http_code}" -o /dev/null "$BASE_URL/api/admin/connections")"
 
     echo " [OK] Profil koneksi '$name' berhasil didaftarkan (HTTP $status)"
 }
 
-# 2. Daftarkan PostgreSQL E-Commerce (Source)
+# 3. Daftarkan PostgreSQL E-Commerce (Source + Dataset 500k Row)
 register_db "Docker PostgreSQL E-Commerce (Source)" "postgres" "localhost" "5433" "test_ecommerce_pg" "test_user" "test_password"
 
-# 3. Daftarkan PostgreSQL E-Commerce Target (Untuk Schema Diff)
+# 4. Daftarkan PostgreSQL E-Commerce Target (Untuk Schema Diff)
 register_db "Docker PostgreSQL E-Commerce (Target Diff)" "postgres" "localhost" "5433" "test_ecommerce_pg_target" "test_user" "test_password"
 
-# 4. Daftarkan MySQL Inventory (Bonus Multi-DBMS)
+# 5. Daftarkan MySQL Inventory (Bonus Multi-DBMS M1)
 register_db "Docker MySQL Inventory" "mysql" "localhost" "3307" "test_inventory_mysql" "test_user" "test_password"
 
-# 5. Daftarkan MariaDB Human Resources (Bonus Multi-DBMS)
+# 6. Daftarkan MariaDB Human Resources (Bonus Multi-DBMS M1)
 register_db "Docker MariaDB Human Resources" "mariadb" "localhost" "3308" "test_hr_mariadb" "test_user" "test_password"
 
-# 6. Berikan Hak Akses View + Edit (Level 2) ke seluruh group pada database baru
+# 7. Berikan Hak Akses View + Edit (Level 2) ke seluruh group pada database baru
 if [ -n "${DATABASE_URL:-}" ]; then
     echo "=== Mengaktifkan Hak Akses (View + Edit) untuk Testing Manual ==="
     psql "$DATABASE_URL" -q <<EOF
@@ -91,6 +90,6 @@ fi
 
 echo ""
 echo "=========================================================================="
-echo " SELURUH DATABASE TESTING TELAH TERHUBUNG DAN SIAP DIGUNAKAN DI WEB!"
+echo " SELURUH DATABASE TESTING TELAH TERHUBUNG DAN SIAP DIGUNAKAN DI SPA!"
 echo " Buka browser di http://localhost:8080/databases untuk mulai eksplorasi."
 echo "=========================================================================="

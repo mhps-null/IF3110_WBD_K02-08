@@ -10,11 +10,12 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/config"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/password"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := observability.NewLogger(os.Stdout, slog.LevelInfo).Slog()
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Error("invalid application configuration", "reason", err.Error())
