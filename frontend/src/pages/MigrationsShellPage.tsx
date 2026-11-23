@@ -1,176 +1,496 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, Crown, FileCode2, Info, Table2 } from 'lucide-react';
-import { adminApi, migrationsApi } from '../api/endpoints';
-import { ApiError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import type { DatabaseAccessGroupsResponse, MigrationRecord } from '../types/api';
-import { Badge, EmptyState, ErrorState, LoadingState, PageHeader } from '../components/shared/UIStates';
+import { useToast } from '../context/ToastContext';
+import { lifecycleApi, type LifecycleDefinition, type LifecycleExecution, type LifecycleRequest, type LifecycleApproval, type LifecycleApprovalDecision } from '../api/lifecycle';
+import { PageHeader, LoadingState, ErrorState, EmptyState, Badge } from '../components/shared/UIStates';
+
+const blank = {
+  title: '',
+  sql_up: '',
+  sql_down: '',
+  irreversible_reason: '',
+};
+
+type Details = {
+  request: LifecycleRequest;
+  definition: LifecycleDefinition;
+  approvals: LifecycleApproval[];
+  approval_history: LifecycleApprovalDecision[];
+};
 
 export function MigrationsShellPage() {
-  const { id } = useParams<{ id?: string }>();
-  const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
   const { accessibleDatabases } = useAuth();
+  const { notify } = useToast();
+  const navigate = useNavigate();
 
-  const selectedDbId = id ? Number(id) : accessibleDatabases[0]?.db_id ?? 0;
+  const db = id ? Number(id) : accessibleDatabases[0]?.db_id ?? 0;
+  const current = accessibleDatabases.find((x) => x.db_id === db);
+  const canEdit = current?.level === 2 || current?.level_label === 'View + Edit';
 
-  const [migrations, setMigrations] = useState<MigrationRecord[]>([]);
-  const [approvers, setApprovers] = useState<DatabaseAccessGroupsResponse | null>(null);
+  const [requests, setRequests] = useState<LifecycleRequest[]>([]);
+  const [history, setHistory] = useState<LifecycleExecution[]>([]);
+  const [hideRollback, setHideRollback] = useState(false);
+  const [form, setForm] = useState(blank);
+  const [irreversible, setIrreversible] = useState(false);
+  const [selected, setSelected] = useState<Details | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<number | null>(null);
 
   const load = useCallback(async () => {
-    if (!selectedDbId || selectedDbId <= 0) return;
+    if (!db) return;
+
     setLoading(true);
     setError('');
+
     try {
-      const [migRes, appRes] = await Promise.all([
-        migrationsApi.listByDatabase(selectedDbId),
-        adminApi.getDatabaseAccessGroups(selectedDbId).catch(() => null),
+      const [r, h] = await Promise.all([
+        lifecycleApi.list(db),
+        lifecycleApi.history(db, hideRollback),
       ]);
-      setMigrations(migRes.migrations ?? []);
-      setApprovers(appRes);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Gagal memuat daftar migration.');
+
+      setRequests(r.items ?? []);
+      setHistory(h.items ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gagal memuat migration');
     } finally {
       setLoading(false);
     }
-  }, [selectedDbId]);
+  }, [db, hideRollback]);
 
   useEffect(() => {
     void load();
+    setSelected(null);
   }, [load]);
 
-  const currentDb = accessibleDatabases.find((d) => d.db_id === selectedDbId);
+  const act = async (description: string, fn: () => Promise<unknown>) => {
+    setBusy(true);
+
+    try {
+      await fn();
+      notify('success', `${description} berhasil`);
+      await load();
+      setSelected(null);
+      setEditing(null);
+    } catch (e) {
+      notify('error', e instanceof Error ? e.message : 'Operasi gagal');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const definition = () => ({
+    title: form.title,
+    sql_up: form.sql_up,
+    sql_down: irreversible ? '' : form.sql_down,
+    irreversible_reason: irreversible ? form.irreversible_reason : '',
+  });
+
+  const open = async (r: LifecycleRequest) => {
+    try {
+      setSelected(await lifecycleApi.detail(db, r.id));
+    } catch (e) {
+      notify('error', e instanceof Error ? e.message : 'Gagal membuka detail');
+    }
+  };
+
+  const edit = (d: Details) => {
+    setEditing(d.request.id);
+
+    setForm({
+      title: d.definition.title,
+      sql_up: d.definition.sql_up,
+      sql_down: d.definition.sql_down,
+      irreversible_reason: d.definition.irreversible_reason,
+    });
+
+    setIrreversible(Boolean(d.definition.irreversible_reason));
+  };
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
-        title="Migrations & History"
-        description="Integrasi SPA Shell untuk Migration Editor (Up/Down/Irreversible), Approval Multi-Group, Rollback/Forward, dan Hide Rollback (domain Orang 3)."
+        title="Migration Lifecycle & History"
+        description="SQL Up/Down, review seluruh group, eksekusi asynchronous, rollback/forward, dan riwayat immutable."
         actions={
-          accessibleDatabases.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                aria-label="Pilih database target"
-                value={selectedDbId || ''}
-                onChange={(e) => navigate(`/databases/${e.target.value}/migrations`)}
-                className="input-field w-auto min-w-[200px]"
-              >
-                {accessibleDatabases.map((db) => (
-                  <option key={db.db_id} value={db.db_id}>
-                    {db.name} ({db.level_label})
-                  </option>
-                ))}
-              </select>
-              {selectedDbId > 0 && (
-                <Link to={`/databases/${selectedDbId}/schema`} className="btn-secondary text-xs">
-                  <Table2 className="h-3.5 w-3.5" />
-                  Schema Viewer
-                </Link>
-              )}
-            </div>
-          )
+          <select
+            aria-label="Database target"
+            className="input-field min-w-48"
+            value={db || ''}
+            onChange={(e) => navigate(`/databases/${e.target.value}/migrations`)}
+          >
+            {accessibleDatabases.map((d) => (
+              <option key={d.db_id} value={d.db_id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
         }
       />
 
-      {/* Integration Contract Banner for Orang 3 */}
-      <div className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50/70 p-4 text-sm text-indigo-950">
-        <div className="flex items-start gap-2.5">
-          <Info className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600" />
-          <div className="space-y-1">
-            <p className="font-semibold">Titik Integrasi Modul Orang 3 (Migration & Approval)</p>
-            <p className="text-xs leading-relaxed text-indigo-900">
-              Shell SPA ini sudah membaca riwayat M1 melalui{' '}
-              <code className="rounded bg-white/80 px-1 py-0.5 font-mono">GET /api/databases/:id/migrations</code>{' '}
-              dan approver group melalui{' '}
-              <code className="rounded bg-white/80 px-1 py-0.5 font-mono">GET /api/databases/:id/access-groups</code>.
-              Orang 3 dapat langsung menambahkan Migration Editor (SQL Up/Down/Irreversible), tombol
-              Submit/Approve/Execute, Rollback/Forward, dan checkbox <strong>Hide rollback</strong> di
-              halaman ini menggunakan <code className="rounded bg-white/80 px-1 py-0.5 font-mono">apiRequest()</code>.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {accessibleDatabases.length === 0 ? (
+      {!db ? (
         <EmptyState
-          title="Tidak ada database target"
-          description="Kamu belum memiliki akses ke database mana pun untuk melihat atau membuat migration."
+          title="Tidak ada database"
+          description="Akunmu belum memiliki akses database."
         />
       ) : (
         <>
-          {approvers && (
-            <div
-              className={`mb-6 rounded-xl border p-4 text-xs ${
-                approvers.has_missing_leaders
-                  ? 'border-amber-200 bg-amber-50 text-amber-900'
-                  : 'border-slate-200 bg-white text-slate-700'
-              }`}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="flex items-center gap-1.5 font-semibold">
-                  {approvers.has_missing_leaders ? (
-                    <AlertTriangle className="h-4 w-4 text-amber-600" />
-                  ) : (
-                    <Crown className="h-4 w-4 text-amber-500" />
-                  )}
-                  Required Approvers untuk {currentDb?.name ?? `DB #${selectedDbId}`}
-                </span>
-                <Badge variant={approvers.has_missing_leaders ? 'amber' : 'emerald'}>
-                  {approvers.has_missing_leaders ? 'Pending — Leader Belum Lengkap' : 'Semua Group Punya Leader'}
-                </Badge>
-              </div>
-              {approvers.has_missing_leaders && (
-                <p className="mt-1 text-amber-800">{approvers.pending_reason}</p>
+          {canEdit && (
+            <section className="card p-5 space-y-3">
+              <h2 className="font-semibold text-sm">
+                {editing ? `Revisi draft request #${editing}` : 'Buat migration baru'}
+              </h2>
+
+              <input
+                className="input-field w-full"
+                placeholder="Judul migration"
+                aria-label="Judul"
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+              />
+
+              <label className="block text-sm">
+                SQL Up
+                <textarea
+                  className="input-field w-full font-mono mt-1"
+                  rows={5}
+                  value={form.sql_up}
+                  onChange={(e) => setForm({ ...form, sql_up: e.target.value })}
+                />
+              </label>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={irreversible}
+                  onChange={(e) => setIrreversible(e.target.checked)}
+                />
+                Irreversible (tidak bisa rollback)
+              </label>
+
+              {irreversible ? (
+                <label className="block text-sm">
+                  Alasan irreversible
+                  <textarea
+                    className="input-field w-full mt-1"
+                    value={form.irreversible_reason}
+                    onChange={(e) =>
+                      setForm({ ...form, irreversible_reason: e.target.value })
+                    }
+                  />
+                </label>
+              ) : (
+                <label className="block text-sm">
+                  SQL Down
+                  <textarea
+                    className="input-field w-full font-mono mt-1"
+                    rows={5}
+                    value={form.sql_down}
+                    onChange={(e) => setForm({ ...form, sql_down: e.target.value })}
+                  />
+                </label>
               )}
-            </div>
+
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  disabled={busy || !form.title.trim() || !form.sql_up.trim()}
+                  className="btn-primary"
+                  onClick={() =>
+                    void act(
+                      editing ? 'Revisi' : 'Buat draft',
+                      () =>
+                        editing
+                          ? lifecycleApi.revise(db, editing, definition())
+                          : lifecycleApi.create(db, definition())
+                    )
+                  }
+                >
+                  {editing ? 'Simpan revisi' : 'Simpan draft'}
+                </button>
+
+                {editing && (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      setEditing(null);
+                      setForm(blank);
+                    }}
+                  >
+                    Batal revisi
+                  </button>
+                )}
+              </div>
+
+              <p className="text-xs text-slate-500">
+                Perubahan SQL setelah attempt tidak diperbolehkan. Untuk mengoreksi migration yang
+                pernah dicoba, buat migration baru.
+              </p>
+            </section>
           )}
 
-          {loading && <LoadingState label="Memuat riwayat migration..." />}
-          {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
-          {!loading && !error && migrations.length === 0 && (
-            <EmptyState
-              title="Belum ada migration pada database ini"
-              description="Riwayat migration M1/M2 untuk database terpilih akan muncul di sini."
-            />
-          )}
+          <section className="card p-5 space-y-3">
+            <h2 className="font-semibold text-sm">
+              Permintaan migration
+            </h2>
 
-          {!loading && !error && migrations.length > 0 && (
-            <div className="space-y-3">
-              {migrations.map((m) => (
-                <article key={m.id} className="card p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <FileCode2 className="h-4 w-4 text-indigo-600" />
-                      <h3 className="text-sm font-semibold text-slate-900">
-                        {m.version ? `v${m.version} — ` : ''}
-                        {m.title}
-                      </h3>
-                    </div>
-                    <Badge
-                      variant={
-                        m.status === 'success'
-                          ? 'emerald'
-                          : m.status === 'failed'
-                            ? 'rose'
-                            : 'neutral'
+            {loading && <LoadingState label="Memuat..." />}
+            {error && <ErrorState message={error} onRetry={() => void load()} />}
+
+            {!loading && !error && requests.length === 0 && (
+              <EmptyState
+                title="Belum ada migration M2"
+                description="Buat draft untuk memulai review."
+              />
+            )}
+
+            {requests.map((r) => (
+              <div
+                className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 py-3"
+                key={r.id}
+              >
+                <div className="text-sm">
+                  <strong>#{r.id}</strong> · Migration #{r.migration_id} · {r.action} ·{' '}
+                  <Badge
+                    variant={
+                      r.status === 'approved'
+                        ? 'emerald'
+                        : r.status === 'failed'
+                          ? 'rose'
+                          : 'neutral'
+                    }
+                  >
+                    {r.status}
+                  </Badge>
+                </div>
+
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    className="btn-secondary text-xs"
+                    onClick={() => void open(r)}
+                  >
+                    Detail / Review
+                  </button>
+
+                  {canEdit && r.status === 'draft' && (
+                    <>
+                      <button
+                        disabled={busy}
+                        className="btn-secondary text-xs"
+                        onClick={() =>
+                          void act('Validasi', () => lifecycleApi.validate(db, r.id))
+                        }
+                      >
+                        Validasi SQL
+                      </button>
+
+                      <button
+                        disabled={busy}
+                        className="btn-primary text-xs"
+                        onClick={() =>
+                          void act('Submit', () => lifecycleApi.submit(db, r.id))
+                        }
+                      >
+                        Submit review
+                      </button>
+                    </>
+                  )}
+
+                  {canEdit && ['pending_review', 'approved'].includes(r.status) && (
+                    <button
+                      disabled={busy}
+                      className="btn-secondary text-xs"
+                      onClick={() =>
+                        void act('Perbarui reviewer', () => lifecycleApi.refreshReview(db, r.id))
                       }
                     >
-                      {m.status}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Dibuat oleh {m.created_by_name || `#${m.created_by}`} ·{' '}
-                    {new Date(m.created_at).toLocaleString('id-ID')}
-                  </p>
-                  <div className="mt-3 overflow-x-auto rounded-lg bg-slate-900 p-3 font-mono text-xs text-slate-100">
-                    <pre className="whitespace-pre">{m.sql_text}</pre>
-                  </div>
-                </article>
-              ))}
-            </div>
+                      Refresh review
+                    </button>
+                  )}
+
+                  {canEdit && r.status === 'approved' && (
+                    <button
+                      disabled={busy}
+                      className="btn-primary text-xs"
+                      onClick={() => {
+                        if (window.confirm('Enqueue eksekusi asynchronous?'))
+                          void act('Enqueue job', () => lifecycleApi.queue(db, r.id));
+                      }}
+                    >
+                      Execute
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </section>
+
+          {selected && (
+            <section className="card p-5 space-y-3">
+              <div className="flex justify-between gap-2">
+                <h2 className="font-semibold">
+                  Detail request #{selected.request.id}
+                </h2>
+                <button
+                  className="btn-secondary text-xs"
+                  onClick={() => setSelected(null)}
+                >
+                  Tutup
+                </button>
+              </div>
+
+              <p className="text-sm">
+                Tindakan: {selected.request.action}, status: {selected.request.status}, revisi #{selected.request.revision_id}
+              </p>
+
+              <h3 className="text-sm font-semibold">SQL Up</h3>
+              <pre className="overflow-x-auto bg-slate-900 text-white p-3 rounded text-xs">
+                {selected.definition.sql_up}
+              </pre>
+
+              <h3 className="text-sm font-semibold">SQL Down / irreversible</h3>
+              <pre className="overflow-x-auto bg-slate-900 text-white p-3 rounded text-xs">
+                {selected.definition.sql_down || selected.definition.irreversible_reason}
+              </pre>
+
+              <h3 className="text-sm font-semibold">
+                Status approval setiap group
+              </h3>
+
+              <ul className="text-sm space-y-1">
+                {selected.approvals.map((a) => (
+                  <li key={a.group_id}>
+                    Group #{a.group_id}: {a.leader_id ? `Leader #${a.leader_id}` : 'Belum punya leader'} —{' '}
+                    {a.decision === 'approved'
+                      ? `Approved by #${a.decided_by ?? a.approved_by}`
+                      : a.decision === 'rejected'
+                        ? `Rejected by #${a.decided_by}`
+                        : 'Pending'}
+                  </li>
+                ))}
+              </ul>
+
+              {selected.approval_history.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold">Riwayat keputusan</h3>
+                  <ul className="text-sm space-y-1">
+                    {selected.approval_history.map((decision) => (
+                      <li key={decision.id}>
+                        Revision #{decision.revision_id} · Group #{decision.group_id} ·{' '}
+                        {decision.decision === 'approved' ? 'Approved' : 'Rejected'} by user #{decision.actor_id} ·{' '}
+                        {new Date(decision.decided_at).toLocaleString('id-ID')}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {canEdit &&
+                ['draft', 'pending_review', 'rejected'].includes(selected.request.status) &&
+                selected.request.action === 'up' && (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => edit(selected)}
+                  >
+                    Buat revisi
+                  </button>
+                )}
+            </section>
           )}
+
+          <section className="card p-5 space-y-3">
+            <div className="flex justify-between flex-wrap gap-2">
+              <h2 className="font-semibold text-sm">
+                Execution History
+              </h2>
+
+              <label className="text-sm flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={hideRollback}
+                  onChange={(e) => setHideRollback(e.target.checked)}
+                />
+                Hide rollback (berdasarkan pasangan execution ID)
+              </label>
+            </div>
+
+            {history.length === 0 && (
+              <p className="text-sm text-slate-500">
+                Belum ada execution record.
+              </p>
+            )}
+
+            {history.map((e) => (
+              <div
+                key={e.attempt_id}
+                className="border-b border-slate-100 py-3 text-sm space-y-2"
+              >
+                <div className="flex flex-wrap justify-between gap-2">
+                  <strong>
+                    Execution #{e.execution_id} · attempt #{e.attempt} · {e.action} · {e.status}
+                  </strong>
+                  <span>
+                    {new Date(e.executed_at).toLocaleString('id-ID')}
+                  </span>
+                </div>
+
+                <p>
+                  Migration #{e.migration_id}, revisi #{e.revision_id}, attempt {e.attempt}{' '}
+                  {e.rollback_of_execution_id
+                    ? `· rollback/forward reference #${e.rollback_of_execution_id}`
+                    : ''}
+                </p>
+
+                <pre className="overflow-x-auto bg-slate-900 text-white p-3 rounded text-xs">
+                  {e.sql_snapshot}
+                </pre>
+
+                {e.error_message && (
+                  <p role="alert" className="text-rose-700">
+                    {e.error_message}
+                  </p>
+                )}
+
+                {canEdit && e.status === 'success' && e.action !== 'rollback' && (
+                  <button
+                    disabled={busy}
+                    className="btn-secondary text-xs"
+                    onClick={() =>
+                      void act('Ajukan rollback', () =>
+                        lifecycleApi.action(db, e.migration_id, 'rollback')
+                      )
+                    }
+                  >
+                    Ajukan rollback
+                  </button>
+                )}
+
+                {canEdit && e.status === 'success' && e.action === 'rollback' && (
+                  <button
+                    disabled={busy}
+                    className="btn-secondary text-xs"
+                    onClick={() =>
+                      void act('Ajukan forward', () =>
+                        lifecycleApi.action(db, e.migration_id, 'forward')
+                      )
+                    }
+                  >
+                    Ajukan forward
+                  </button>
+                )}
+              </div>
+            ))}
+          </section>
+
+          <p className="text-xs text-slate-500">
+            Setelah enqueue, status job dipantau pada{' '}
+            <Link to="/jobs" className="underline">
+              Job Monitoring
+            </Link>
+            . Keberhasilan enqueue bukan keberhasilan eksekusi.
+          </p>
         </>
       )}
     </div>

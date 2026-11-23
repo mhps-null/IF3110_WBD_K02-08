@@ -1,61 +1,161 @@
-import { CheckSquare, Crown, Info } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
-import { Badge, EmptyState, PageHeader } from '../components/shared/UIStates';
+import { useCallback, useEffect, useState } from 'react';
+import { lifecycleApi, type LifecycleRequest, type LifecycleApproval, type LifecycleApprovalDecision } from '../api/lifecycle';
+import { useToast } from '../context/ToastContext';
+import { PageHeader, EmptyState, ErrorState, LoadingState } from '../components/shared/UIStates';
 
 export function ApprovalsInboxPage() {
-  const { groups } = useAuth();
-  const leaderGroups = groups.filter((g) => g.is_leader);
+  const { notify } = useToast();
+
+  const [items, setItems] = useState<LifecycleRequest[]>([]);
+  const [detail, setDetail] = useState<{
+    request: LifecycleRequest;
+    approvals: LifecycleApproval[];
+    approval_history: LifecycleApprovalDecision[];
+    sql: string;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await lifecycleApi.inbox();
+      setItems(result.items ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gagal memuat inbox');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const open = async (r: LifecycleRequest) => {
+    try {
+      const d = await lifecycleApi.detail(r.db_id, r.id);
+
+      setDetail({
+        request: d.request,
+        approvals: d.approvals,
+        approval_history: d.approval_history,
+        sql: r.action === 'rollback' ? d.definition.sql_down : d.definition.sql_up,
+      });
+    } catch (e) {
+      notify('error', e instanceof Error ? e.message : 'Detail gagal dimuat');
+    }
+  };
+
+  const decide = async (decision: 'approve' | 'reject') => {
+    if (!detail) return;
+
+    setBusy(true);
+
+    try {
+      await lifecycleApi.decide(detail.request.db_id, detail.request.id, decision);
+      notify('success', `Request #${detail.request.id} ${decision}`);
+      setDetail(null);
+      await refresh();
+    } catch (e) {
+      notify('error', e instanceof Error ? e.message : 'Gagal memproses approval');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <div>
+    <div className="space-y-5">
       <PageHeader
         title="Review Inbox & Approvals"
-        description="Daftar pengajuan migration (Up, Rollback, Forward) yang menunggu persetujuan Group Leader."
+        description="Setiap leader menyetujui seluruh group yang dipimpinnya dalam satu tindakan."
       />
 
-      <div className="card mb-6 p-5">
-        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <Crown className="h-4 w-4 text-amber-500" />
-          Group yang Kamu Pimpin ({leaderGroups.length})
-        </h2>
-        {leaderGroups.length === 0 ? (
-          <p className="text-sm text-slate-600">
-            Saat ini kamu belum ditunjuk sebagai Group Leader pada group mana pun. Hanya Group
-            Leader dari group yang memiliki akses ke database target yang dapat memberikan approval.
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {leaderGroups.map((g) => (
-              <Badge key={g.group_id} variant="amber">
-                <Crown className="h-3 w-3" />
-                {g.group_name}
-              </Badge>
-            ))}
+      {loading && <LoadingState label="Memuat review inbox..." />}
+      {error && <ErrorState message={error} onRetry={() => void refresh()} />}
+
+      {!loading && !error && items.length === 0 && (
+        <EmptyState
+          title="Tidak ada review menunggu keputusanmu"
+          description="Migration yang memerlukan persetujuanmu akan muncul di sini."
+        />
+      )}
+
+      {items.map((r) => (
+        <div
+          key={r.id}
+          className="card p-4 flex flex-wrap items-center justify-between gap-3"
+        >
+          <div className="text-sm">
+            Request #{r.id} · DB #{r.db_id} · Migration #{r.migration_id} · {r.action} · Revision #{r.revision_id}
           </div>
-        )}
-      </div>
-
-      <div className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50/70 p-4 text-xs text-indigo-900">
-        <div className="flex items-start gap-2.5">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" />
-          <p>
-            <strong>Slot Integrasi Orang 3:</strong> Komponen ini siap dihubungkan dengan endpoint
-            Approval Workflow milik Orang 3 (approve/reject multi-group, satu aksi leader mewakili
-            seluruh group yang dipimpinnya, status Pending untuk group tanpa leader).
-          </p>
+          <button className="btn-secondary" onClick={() => void open(r)}>
+            Review
+          </button>
         </div>
-      </div>
+      ))}
 
-      <EmptyState
-        title="Belum ada pengajuan menunggu review"
-        description="Pengajuan migration yang membutuhkan persetujuan leader akan tampil di sini setelah modul approval Orang 3 terhubung."
-        action={
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500">
-            <CheckSquare className="h-4 w-4" />
-            Siap integrasi API Orang 3
-          </span>
-        }
-      />
+      {detail && (
+        <section className="card p-5 space-y-3">
+          <div className="flex justify-between">
+            <h2 className="font-semibold">
+              Review request #{detail.request.id}
+            </h2>
+            <button className="btn-secondary" onClick={() => setDetail(null)}>
+              Tutup
+            </button>
+          </div>
+
+          <p className="text-sm">
+            Tindakan: {detail.request.action}
+          </p>
+
+          <pre className="bg-slate-900 text-white rounded p-3 overflow-x-auto text-xs">
+            {detail.sql}
+          </pre>
+
+          <ul className="text-sm">
+            {detail.approvals.map((a) => (
+              <li key={a.group_id}>
+                Group #{a.group_id} · Leader {a.leader_id ?? 'belum ditetapkan'} ·{' '}
+                {a.decision === 'approved' ? 'Approved' : a.decision === 'rejected' ? 'Rejected' : 'Pending'}
+              </li>
+            ))}
+          </ul>
+
+          {detail.approval_history.length > 0 && (
+            <ul className="text-sm space-y-1">
+              {detail.approval_history.map((decision) => (
+                <li key={decision.id}>
+                  Revision #{decision.revision_id} · Group #{decision.group_id} · {decision.decision} by user #{decision.actor_id}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              className="btn-primary"
+              disabled={busy}
+              onClick={() => void decide('approve')}
+            >
+              Approve
+            </button>
+            <button
+              className="btn-secondary"
+              disabled={busy}
+              onClick={() => {
+                if (window.confirm('Tolak request ini?')) void decide('reject');
+              }}
+            >
+              Reject
+            </button>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

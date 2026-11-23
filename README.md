@@ -84,6 +84,8 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/001_initial_schema.sq
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/002_session_privilege_version.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/003_audit_logs.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/004_group_leader.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/005_migration_lifecycle.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/006_lifecycle_execution_runs.sql
 ```
 
 ---
@@ -220,6 +222,8 @@ psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/001_initial_sche
 psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/002_session_privilege_version.sql
 psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/003_audit_logs.sql
 psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/004_group_leader.sql
+psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/005_migration_lifecycle.sql
+psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/006_lifecycle_execution_runs.sql
 
 # Jalankan seluruh test integrasi
 TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
@@ -267,6 +271,7 @@ TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
 │   ├── contract/             # Antarmuka, tipe data bersama, dan principal context
 │   ├── dbdriver/             # Driver Postgres & MySQL/MariaDB (introspeksi katalog aman, rows, exec)
 │   ├── explain/              # Parser execution plan EXPLAIN / ANALYZE
+│   ├── lifecycle/            # Migration revisions, approvals, execution runs, & attempts
 │   ├── migration/            # Repository, service eksekusi transaksional, & read JSON API
 │   ├── observability/        # Structured JSON logger (slog + redaction), W3C tracer, & metrics recorder
 │   ├── password/             # Hashing & verifikasi password PBKDF2-SHA256
@@ -274,6 +279,6 @@ TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
 │   ├── session/              # Store session PostgreSQL, rotasi privilege_version, & grace period
 │   ├── viewer/               # Handler & JSON API database viewer dengan structured SQL read-only logging
 │   └── web/                  # Middleware CSRF (form & JSON header), security headers, & SPA handler
-├── migrations_meta/          # SQL migration additive untuk database metadata platform (001 s.d. 004)
+├── migrations_meta/          # SQL migration additive untuk database metadata platform (001 s.d. 006)
 └── web/                      # Template & asset legacy M1 (dipertahankan untuk kompatibilitas unit test M1)
 ```
