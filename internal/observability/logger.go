@@ -61,12 +61,21 @@ func (l *Logger) LogActivity(ctx context.Context, event, actor, database, status
 	if l == nil || l.slogger == nil {
 		return
 	}
-	attrs := append(baseAttrs(ctx, event, resolveActor(ctx, actor), database, status), extra...)
+	cleanEvent := SanitizeLogString(event)
+	cleanActor := SanitizeLogString(resolveActor(ctx, actor))
+	cleanDB := SanitizeLogString(database)
+	cleanStatus := SanitizeLogString(status)
+
+	sanitizedExtra := make([]slog.Attr, len(extra))
+	for i, a := range extra {
+		sanitizedExtra[i] = sanitizeLogAttr(a)
+	}
+	attrs := append(baseAttrs(ctx, cleanEvent, cleanActor, cleanDB, cleanStatus), sanitizedExtra...)
 	level := slog.LevelInfo
-	if status == "error" || status == "failed" {
+	if cleanStatus == "error" || cleanStatus == "failed" {
 		level = slog.LevelError
 	}
-	l.slogger.LogAttrs(ctx, level, event, attrs...)
+	l.slogger.LogAttrs(ctx, level, cleanEvent, attrs...)
 }
 
 func (l *Logger) LogSQLStart(ctx context.Context, ev SQLEvent) {
@@ -105,14 +114,19 @@ func (l *Logger) emitSQL(ctx context.Context, ev SQLEvent, defaultEvent, default
 		}
 	}
 
-	attrs := baseAttrs(ctx, ev.Event, resolveActor(ctx, ev.Actor), ev.Database, ev.Status)
+	cleanEvent := SanitizeLogString(ev.Event)
+	cleanActor := SanitizeLogString(resolveActor(ctx, ev.Actor))
+	cleanDB := SanitizeLogString(ev.Database)
+	cleanStatus := SanitizeLogString(ev.Status)
+
+	attrs := baseAttrs(ctx, cleanEvent, cleanActor, cleanDB, cleanStatus)
 	if ev.Query != "" {
 		attrs = append(attrs, slog.String("query", RedactString(ev.Query)))
 	}
 	if len(ev.Params) > 0 {
 		attrs = append(attrs, slog.Any("params", RedactParams(ev.Params)))
 	}
-	if ev.Duration > 0 || ev.Event != EventSQLStart {
+	if ev.Duration > 0 || cleanEvent != EventSQLStart {
 		attrs = append(attrs, slog.Int64("duration_ms", ev.Duration.Milliseconds()))
 	}
 	if ev.RowsAffected != nil {
@@ -128,7 +142,7 @@ func (l *Logger) emitSQL(ctx context.Context, ev SQLEvent, defaultEvent, default
 		attrs = append(attrs, slog.Int64("version", ev.Version))
 	}
 	if ev.JobID != "" {
-		attrs = append(attrs, slog.String("job_id", ev.JobID))
+		attrs = append(attrs, slog.String("job_id", SanitizeLogString(ev.JobID)))
 	}
 	if ev.Attempt > 0 {
 		attrs = append(attrs, slog.Int("attempt", ev.Attempt))
@@ -137,33 +151,54 @@ func (l *Logger) emitSQL(ctx context.Context, ev SQLEvent, defaultEvent, default
 		attrs = append(attrs, slog.Int("batch", ev.Batch))
 	}
 	if state := resolveSQLState(ev.SQLState, ev.Err); state != "" {
-		attrs = append(attrs, slog.String("sqlstate", state))
+		attrs = append(attrs, slog.String("sqlstate", SanitizeLogString(state)))
 	}
 	if ev.Err != nil {
 		attrs = append(attrs, slog.String("error", RedactString(ev.Err.Error())))
 	}
 
 	level := slog.LevelInfo
-	if ev.Err != nil || ev.Status == "failed" || ev.Status == "error" {
+	if ev.Err != nil || cleanStatus == "failed" || cleanStatus == "error" {
 		level = slog.LevelError
 	}
-	l.slogger.LogAttrs(ctx, level, ev.Event, attrs...)
+	l.slogger.LogAttrs(ctx, level, cleanEvent, attrs...)
 }
 
 func baseAttrs(ctx context.Context, event, actor, database, status string) []slog.Attr {
-	corrID := CorrelationIDFrom(ctx)
+	corrID := SanitizeLogString(CorrelationIDFrom(ctx))
 	sc, hasSpan := SpanContextFrom(ctx)
 	attrs := []slog.Attr{
-		slog.String("event", event),
-		slog.String("actor", actor),
-		slog.String("database", database),
-		slog.String("status", status),
+		slog.String("event", SanitizeLogString(event)),
+		slog.String("actor", SanitizeLogString(actor)),
+		slog.String("database", SanitizeLogString(database)),
+		slog.String("status", SanitizeLogString(status)),
 		slog.String("correlation_id", corrID),
 	}
 	if hasSpan {
-		attrs = append(attrs, slog.String("trace_id", sc.TraceID), slog.String("span_id", sc.SpanID))
+		attrs = append(attrs, slog.String("trace_id", SanitizeLogString(sc.TraceID)), slog.String("span_id", SanitizeLogString(sc.SpanID)))
 	}
 	return attrs
+}
+
+func sanitizeLogAttr(a slog.Attr) slog.Attr {
+	if IsSensitiveKey(a.Key) {
+		return slog.String(a.Key, RedactedValue)
+	}
+	switch a.Value.Kind() {
+	case slog.KindString:
+		return slog.String(a.Key, RedactString(a.Value.String()))
+	case slog.KindGroup:
+		group := a.Value.Group()
+		cleaned := make([]slog.Attr, len(group))
+		for i, ga := range group {
+			cleaned[i] = sanitizeLogAttr(ga)
+		}
+		return slog.Attr{Key: a.Key, Value: slog.GroupValue(cleaned...)}
+	case slog.KindAny:
+		return slog.Any(a.Key, RedactValue(a.Key, a.Value.Any()))
+	default:
+		return a
+	}
 }
 
 func resolveActor(ctx context.Context, explicit string) string {

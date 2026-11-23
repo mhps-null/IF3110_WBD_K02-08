@@ -109,12 +109,16 @@ func TestRows(t *testing.T) {
 			db := testDB(t, &mockDriver{query: func(q string, args []driver.NamedValue) (driver.Rows, error) {
 				switch {
 				case strings.Contains(q, "FROM pg_attribute"):
-					rows := &staticRows{cols: []string{"attname"}}
+					rows := &staticRows{cols: []string{"nspname", "relname", "attname"}}
 					if len(args) != 2 || args[0].Value != "public" {
 						t.Fatal("metadata schema/table not parameterized")
 					}
 					if args[1].Value == "users" {
-						rows.data = [][]driver.Value{{"id"}, {"Nama"}, {"nama"}}
+						rows.data = [][]driver.Value{
+							{"public", "users", "id"},
+							{"public", "users", "Nama"},
+							{"public", "users", "nama"},
+						}
 					}
 					return rows, nil
 				case strings.Contains(q, "COUNT(1)"):

@@ -272,18 +272,22 @@ func Middleware(tracer *Tracer, logger *Logger) func(http.Handler) http.Handler 
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			safeMethod := SanitizeLogString(r.Method)
+			safePath := SanitizeLogString(r.URL.Path)
+			safeCorr := SanitizeLogString(r.Header.Get(CorrelationIDHeader))
+
 			ctx := ExtractTraceContext(r.Context(), map[string]string{
-				TraceParentHeader:   r.Header.Get(TraceParentHeader),
-				CorrelationIDHeader: r.Header.Get(CorrelationIDHeader),
+				TraceParentHeader:   SanitizeLogString(r.Header.Get(TraceParentHeader)),
+				CorrelationIDHeader: safeCorr,
 			})
-			ctx, span := tracer.StartSpan(ctx, r.Method+" "+r.URL.Path,
-				slog.String("http.method", r.Method),
-				slog.String("http.path", r.URL.Path),
+			ctx, span := tracer.StartSpan(ctx, safeMethod+" "+safePath,
+				slog.String("http.method", safeMethod),
+				slog.String("http.path", safePath),
 			)
 			defer span.End()
 
 			w.Header().Set(TraceParentHeader, span.Context().TraceParent())
-			w.Header().Set(CorrelationIDHeader, CorrelationIDFrom(ctx))
+			w.Header().Set(CorrelationIDHeader, SanitizeLogString(CorrelationIDFrom(ctx)))
 
 			sw := &statusCaptureWriter{ResponseWriter: w}
 			next.ServeHTTP(sw, r.WithContext(ctx))
@@ -307,8 +311,8 @@ func Middleware(tracer *Tracer, logger *Logger) func(http.Handler) http.Handler 
 					actor = p.Username
 				}
 				logger.LogActivity(ctx, "http.request", actor, "", status,
-					slog.String("method", r.Method),
-					slog.String("path", r.URL.Path),
+					slog.String("method", safeMethod),
+					slog.String("path", safePath),
 					slog.Int("http_status", code),
 				)
 			}

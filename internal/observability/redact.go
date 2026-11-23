@@ -36,12 +36,21 @@ func IsSensitiveKey(key string) bool {
 	return false
 }
 
-// RedactString masks credentials, tokens, and DSN passwords in free-form strings.
+// SanitizeLogString strips CR/LF characters to prevent log forging / injection.
+func SanitizeLogString(s string) string {
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
+}
+
+// RedactString masks credentials, tokens, and DSN passwords in free-form strings
+// and strips CR/LF control characters to prevent log injection.
 func RedactString(s string) string {
 	if s == "" {
 		return s
 	}
-	out := pgURLPattern.ReplaceAllString(s, "${1}"+RedactedValue+"${3}")
+	out := SanitizeLogString(s)
+	out = pgURLPattern.ReplaceAllString(out, "${1}"+RedactedValue+"${3}")
 	out = mysqlDSNPattern.ReplaceAllString(out, "${1}"+RedactedValue+"${3}")
 	out = kvSecretPattern.ReplaceAllString(out, "${1}${2}"+RedactedValue)
 	return bearerPattern.ReplaceAllString(out, "${1}"+RedactedValue)

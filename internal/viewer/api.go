@@ -150,16 +150,17 @@ func (h *Handler) APITableDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, endSpan := h.startViewerSpan(r.Context(), "viewer.table_detail", slog.Int64("db_id", dbID), slog.String("table", tableName))
+	safeTable := observability.SanitizeLogString(tableName)
+	ctx, endSpan := h.startViewerSpan(r.Context(), "viewer.table_detail", slog.Int64("db_id", dbID), slog.String("table", safeTable))
 	defer endSpan(nil)
 
 	dbLabel := fmt.Sprintf("db#%d", dbID)
 	start := time.Now()
-	h.logSQLStart(ctx, dbLabel, "SELECT table metadata FROM pg_catalog /* read-only viewer */", []any{tableName})
+	h.logSQLStart(ctx, dbLabel, "SELECT table metadata FROM pg_catalog /* read-only viewer */", []any{safeTable})
 
 	db, engine, err := h.targetDB.Open(ctx, dbID)
 	if err != nil {
-		h.logSQLResult(ctx, dbLabel, "SELECT table metadata", []any{tableName}, time.Since(start), nil, err)
+		h.logSQLResult(ctx, dbLabel, "SELECT table metadata", []any{safeTable}, time.Since(start), nil, err)
 		writeViewerJSON(w, http.StatusBadGateway, map[string]string{"error": "Tidak dapat terhubung ke database target."})
 		return
 	}
@@ -170,9 +171,10 @@ func (h *Handler) APITableDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	schema := defaultSchemaForEngine(r.URL.Query().Get("schema"), engine)
+	safeSchema := observability.SanitizeLogString(schema)
 	snapshot, err := intro.Snapshot(ctx, db)
 	if err != nil {
-		h.logSQLResult(ctx, dbLabel, "SELECT table metadata", []any{schema, tableName}, time.Since(start), nil, err)
+		h.logSQLResult(ctx, dbLabel, "SELECT table metadata", []any{safeSchema, safeTable}, time.Since(start), nil, err)
 		if errors.Is(err, contract.ErrAccessDenied) {
 			writeViewerJSON(w, http.StatusForbidden, map[string]string{"error": "Akses ke database ditolak."})
 			return
@@ -226,7 +228,9 @@ func (h *Handler) APITableData(w http.ResponseWriter, r *http.Request) {
 	orderBy := strings.TrimSpace(r.URL.Query().Get("order_by"))
 	desc := strings.EqualFold(r.URL.Query().Get("desc"), "true") || strings.EqualFold(r.URL.Query().Get("order_dir"), "desc")
 
-	ctx, endSpan := h.startViewerSpan(r.Context(), "viewer.table_rows", slog.Int64("db_id", dbID), slog.String("table", tableName))
+	safeTable := observability.SanitizeLogString(tableName)
+	safeOrderBy := observability.SanitizeLogString(orderBy)
+	ctx, endSpan := h.startViewerSpan(r.Context(), "viewer.table_rows", slog.Int64("db_id", dbID), slog.String("table", safeTable))
 	defer endSpan(nil)
 
 	dbLabel := fmt.Sprintf("db#%d", dbID)
@@ -234,7 +238,7 @@ func (h *Handler) APITableData(w http.ResponseWriter, r *http.Request) {
 
 	db, engine, err := h.targetDB.Open(ctx, dbID)
 	if err != nil {
-		h.logSQLResult(ctx, dbLabel, "SELECT table rows (read-only)", []any{tableName, page, pageSize}, time.Since(start), nil, err)
+		h.logSQLResult(ctx, dbLabel, "SELECT table rows (read-only)", []any{safeTable, page, pageSize}, time.Since(start), nil, err)
 		writeViewerJSON(w, http.StatusBadGateway, map[string]string{"error": "Tidak dapat terhubung ke database target."})
 		return
 	}
@@ -245,8 +249,9 @@ func (h *Handler) APITableData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	schema := defaultSchemaForEngine(r.URL.Query().Get("schema"), engine)
-	queryDesc := fmt.Sprintf("SELECT * FROM %s.%s /* read-only paginated viewer */", schema, tableName)
-	params := []any{page, pageSize, orderBy, desc}
+	safeSchema := observability.SanitizeLogString(schema)
+	queryDesc := fmt.Sprintf("SELECT * FROM %s.%s /* read-only paginated viewer */", safeSchema, safeTable)
+	params := []any{page, pageSize, safeOrderBy, desc}
 	h.logSQLStart(ctx, dbLabel, queryDesc, params)
 
 	rowPage, err := intro.Rows(ctx, db, schema, tableName, contract.PageRequest{

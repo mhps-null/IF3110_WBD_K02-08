@@ -35,3 +35,4 @@ go.work.sum
 # Frontend SPA build artifacts & dependencies
 frontend/node_modules/
 frontend/dist/
+*.tsbuildinfo

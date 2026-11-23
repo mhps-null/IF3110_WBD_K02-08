@@ -93,6 +93,32 @@ func TestRedactionComprehensive(t *testing.T) {
 			t.Fatalf("secret %q leaked in structured log: %s", s, out)
 		}
 	}
+	if strings.Contains(out, "\n") && len(strings.Split(strings.TrimSpace(out), "\n")) != 1 {
+		t.Fatalf("expected single JSON log line, got: %s", out)
+	}
+}
+
+func TestLogInjectionSanitization(t *testing.T) {
+	var buf bytes.Buffer
+	logger := NewLogger(&buf, slog.LevelInfo)
+	logger.LogActivity(context.Background(), "http.request", "alice\nfake_actor", "db\r\nfake", "success",
+		slog.String("path", "/api/databases\n{\"level\":\"ERROR\"}"),
+	)
+	logger.LogSQLStart(context.Background(), SQLEvent{
+		Actor:    "bob\r\ninjected",
+		Database: "pg\nfake",
+		Query:    "SELECT *\nFROM users\rWHERE id = 1",
+		Params:   []any{"val\ninjected"},
+	})
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 log lines without injected newlines, got %d: %s", len(lines), buf.String())
+	}
+	for _, line := range lines {
+		if strings.Contains(line, `\n`) || strings.Contains(line, `\r`) {
+			t.Fatalf("expected CR/LF control characters to be stripped, got: %s", line)
+		}
+	}
 }
 
 func TestTraceParentParsingAndValidation(t *testing.T) {
