@@ -21,6 +21,7 @@ import (
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/dbdriver/mysql"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/dbdriver/postgres"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/lifecycle"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/migration"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/session"
@@ -121,6 +122,11 @@ func main() {
 		guards,
 	)
 	migrationHandler.RegisterReadAPIRoutes(mux, authHandler.Authenticate)
+
+	// M2 lifecycle: approval and history domain is separate from the M1 read-only API
+	lifecycleStore := lifecycle.NewStore(db)
+	lifecycleHandler := lifecycle.Handler{Store: lifecycleStore, TargetPools: poolManager, Audit: auditStore, Logger: obsLogger}
+	lifecycleHandler.Register(mux, authHandler.Authenticate)
 
 	auditHandler := audit.NewHandler(auditStore, guards)
 	auditHandler.RegisterRoutesWithAuth(mux, authHandler.Authenticate)
