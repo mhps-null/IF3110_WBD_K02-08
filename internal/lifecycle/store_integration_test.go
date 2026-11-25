@@ -58,6 +58,7 @@ func setupLifecycleDB(t *testing.T) *sql.DB {
 		"004_group_leader.sql",
 		"005_migration_lifecycle.sql",
 		"006_lifecycle_execution_runs.sql",
+		"007_job_queue_worker.sql",
 	} {
 		script, err := os.ReadFile(filepath.Join("..", "..", "migrations_meta", name))
 		if err != nil {
@@ -179,7 +180,9 @@ func TestRefreshReviewAfterLeaderAssignmentAndRecordRejection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(decisionHistory) != 1 || decisionHistory[0].Decision != "approved" || decisionHistory[0].ActorID != author {
+	// One approval by a leader of two groups produced two decision rows above;
+	// refreshing must keep both of them.
+	if len(decisionHistory) != len(firstDecisionHistory) || decisionHistory[0].Decision != "approved" || decisionHistory[0].ActorID != author {
 		t.Fatalf("refresh must preserve prior decision history: %+v", decisionHistory)
 	}
 	requirements, err := store.Approvals(ctx, req.ID)
