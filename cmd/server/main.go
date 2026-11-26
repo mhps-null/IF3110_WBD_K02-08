@@ -21,6 +21,7 @@ import (
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/dbdriver/mysql"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/dbdriver/postgres"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/jobs"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/lifecycle"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/migration"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
@@ -127,6 +128,15 @@ func main() {
 	lifecycleStore := lifecycle.NewStore(db)
 	lifecycleHandler := lifecycle.Handler{Store: lifecycleStore, TargetPools: poolManager, Audit: auditStore, Logger: obsLogger}
 	lifecycleHandler.Register(mux, authHandler.Authenticate)
+
+	// M2 async engine (Orang 4): the API only publishes/controls durable jobs and
+	// returns a job ID; cmd/worker executes them.
+	jobsHandler := jobs.Handler{
+		Service: &jobs.Service{Store: jobs.NewStore(db), Lifecycle: lifecycleStore, Targets: poolManager},
+		Audit:   auditStore,
+		Logger:  obsLogger,
+	}
+	jobsHandler.Register(mux, authHandler.Authenticate)
 
 	auditHandler := audit.NewHandler(auditStore, guards)
 	auditHandler.RegisterRoutesWithAuth(mux, authHandler.Authenticate)

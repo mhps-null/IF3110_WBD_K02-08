@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { lifecycleApi, type LifecycleDefinition, type LifecycleExecution, type LifecycleRequest, type LifecycleApproval, type LifecycleApprovalDecision } from '../api/lifecycle';
 import { PageHeader, LoadingState, ErrorState, EmptyState, Badge } from '../components/shared/UIStates';
+import { ExecuteDialog } from '../components/jobs/ExecuteDialog';
 
 const blank = {
   title: '',
@@ -39,6 +40,7 @@ export function MigrationsShellPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
+  const [executing, setExecuting] = useState<LifecycleRequest | null>(null);
 
   const load = useCallback(async () => {
     if (!db) return;
@@ -314,10 +316,7 @@ export function MigrationsShellPage() {
                     <button
                       disabled={busy}
                       className="btn-primary text-xs"
-                      onClick={() => {
-                        if (window.confirm('Enqueue eksekusi asynchronous?'))
-                          void act('Enqueue job', () => lifecycleApi.queue(db, r.id));
-                      }}
+                      onClick={() => setExecuting(r)}
                     >
                       Execute
                     </button>
@@ -492,6 +491,22 @@ export function MigrationsShellPage() {
             . Keberhasilan enqueue bukan keberhasilan eksekusi.
           </p>
         </>
+      )}
+
+      {executing && (
+        <ExecuteDialog
+          open
+          db={db}
+          requestId={executing.id}
+          action={executing.action}
+          onClose={() => setExecuting(null)}
+          onError={(m) => notify('error', m)}
+          onQueued={(jobId) => {
+            setExecuting(null);
+            notify('success', `Job #${jobId} dipublikasikan ke queue. Pantau progres di Job Monitoring.`);
+            navigate(`/jobs?job=${jobId}`);
+          }}
+        />
       )}
     </div>
   );

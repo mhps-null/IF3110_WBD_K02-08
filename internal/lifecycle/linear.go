@@ -71,8 +71,12 @@ func eligibleTx(ctx context.Context, tx *sql.Tx, q Request) error {
 		return err
 	}
 
+	// A database is busy while another request is queued/running, or while the
+	// job engine holds it (partial batch, partially reverted, compensating, or an
+	// unverified commit outcome). Only the holding request itself may proceed.
 	var busy bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM migration_requests WHERE db_id=$1 AND id<>$2 AND status IN ('pending','running'))`, q.DBID, q.ID).Scan(&busy)
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM migration_requests WHERE db_id=$1 AND id<>$2 AND status IN ('pending','running'))
+		OR EXISTS(SELECT 1 FROM migration_db_holds WHERE db_id=$1 AND request_id<>$2)`, q.DBID, q.ID).Scan(&busy)
 	if err != nil {
 		return err
 	}

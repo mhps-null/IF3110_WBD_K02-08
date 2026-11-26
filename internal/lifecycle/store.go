@@ -429,6 +429,16 @@ func (s *Store) ApprovalHistory(ctx context.Context, id int64) ([]ApprovalDecisi
 // Queue atomically persists an outbox event and switches request to pending
 // Orang 4 publishes/consumes the outbox; this method NEVER executes SQL synchronously
 func (s *Store) Queue(ctx context.Context, id, actor int64) (int64, error) {
+	return s.QueueWith(ctx, id, actor, nil)
+}
+
+// QueueHook runs inside the Queue transaction after the outbox row exists, so the
+// worker-side job record (mode, batch plan, trace context) commits atomically with
+// the pending transition. A hook error aborts the whole enqueue.
+type QueueHook func(ctx context.Context, tx *sql.Tx, req Request, jobID int64) error
+
+// QueueWith is Queue with an optional transactional hook used by the job engine.
+func (s *Store) QueueWith(ctx context.Context, id, actor int64, hook QueueHook) (int64, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -475,13 +485,22 @@ func (s *Store) Queue(ctx context.Context, id, actor int64) (int64, error) {
 	}
 
 	var jobID int64
-	err = tx.QueryRowContext(ctx, `INSERT INTO migration_job_outbox(request_id) VALUES($1) RETURNING id`, id).Scan(&jobID)
+	// One outbox row per request keeps the job ID stable when a request is
+	// re-queued after the worker released it (e.g. stale approval or cancel).
+	err = tx.QueryRowContext(ctx, `INSERT INTO migration_job_outbox(request_id) VALUES($1)
+		ON CONFLICT (request_id) DO UPDATE SET dispatched_at=NULL RETURNING id`, id).Scan(&jobID)
 	if err != nil {
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE migration_requests SET status='pending',updated_at=now() WHERE id=$1`, id)
 	if err != nil {
 		return 0, err
+	}
+	if hook != nil {
+		q.Status = Pending
+		if err = hook(ctx, tx, q, jobID); err != nil {
+			return 0, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return 0, err

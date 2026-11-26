@@ -86,6 +86,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/003_audit_logs.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/004_group_leader.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/005_migration_lifecycle.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/006_lifecycle_execution_runs.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/007_job_queue_worker.sql
 ```
 
 ---
@@ -99,7 +100,13 @@ cd frontend && npm install && npm run build && cd ..
 set -a && source .env && set +a
 go run ./cmd/seed
 go run ./cmd/server
+
+# Terminal lain: worker migration asynchronous (boleh dijalankan lebih dari satu instance)
+set -a && source .env && set +a
+WORKER_ID=worker-1 WORKER_METRICS_ADDR=:9091 go run ./cmd/worker
 ```
+
+Setiap eksekusi migration (termasuk rollback/forward) **hanya** dipublikasikan sebagai job oleh API; SQL dijalankan oleh `cmd/worker`. Tanpa worker, job tetap tersimpan durable di antrean (`Pending (Queue)`) dan diproses ketika worker berjalan. Metrics Prometheus worker tersedia di `http://localhost:9091/metrics`. Detail desain: [`docs/m2-person4.md`](docs/m2-person4.md).
 
 Buka browser di **`http://localhost:8080`** dan login menggunakan kredensial Platform Admin.
 
@@ -170,6 +177,12 @@ Seluruh endpoint mutasi (`POST`, `PUT`, `PATCH`, `DELETE`) mewajibkan cookie CSR
 | `POST` | `/api/admin/connections/test` | Platform Admin | Uji konektivitas langsung ke database target |
 | `GET` | `/api/admin/connections/pool-stats` | Platform Admin | Statistik live connection pool (`OpenConns`, `InUse`, `Idle`, `WaitCount`, `WaitDuration`) |
 | `GET` | `/api/audit-logs` | Platform Admin | Pencarian & paginasi jejak audit platform (`actor`, `event`, `database`, `status`) |
+| `POST` | `/api/v2/databases/{db}/requests/{id}/execute` | View + Edit | Publish job (mode `normal`/`batch`) untuk request **Approved**; **202** + `job_id` tanpa menunggu SQL |
+| `GET` | `/api/v2/jobs?db_id=&status=` | View Only | Daftar job pada database yang dapat diakses user |
+| `GET` | `/api/v2/jobs/{id}` | View Only | Status/progress job, checkpoint batch, timeline worker, dan aksi yang diizinkan |
+| `POST` | `/api/v2/jobs/{id}/resume` | View + Edit | Lanjutkan dari checkpoint (failed/partial), publish ulang (cancelled/rejected), atau verifikasi segera (uncertain) |
+| `POST` | `/api/v2/jobs/{id}/cancel` | View + Edit | Keluarkan job dari antrean, atau hentikan job batch setelah batch saat ini |
+| `POST` | `/api/v2/jobs/{id}/compensate` | View + Edit | Batalkan batch committed dengan SQL down per batch (urutan terbalik) |
 
 ### B. Rute Halaman SPA (`frontend/`)
 
@@ -224,6 +237,7 @@ psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/003_audit_logs.s
 psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/004_group_leader.sql
 psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/005_migration_lifecycle.sql
 psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/006_lifecycle_execution_runs.sql
+psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations_meta/007_job_queue_worker.sql
 
 # Jalankan seluruh test integrasi
 TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
@@ -235,6 +249,7 @@ TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
 
 - **Arsitektur SPA, JSON API, & Group Leader (Orang 1):** [`docs/m2-p1-spa-and-auth.md`](docs/m2-p1-spa-and-auth.md)
 - **Observability, Structured Logging/Tracing, Audit Log, & Dataset 500k Row (Orang 2):** [`docs/m2-observability-and-dataset.md`](docs/m2-observability-and-dataset.md)
+- **Async Engine: Queue, Worker, Lock, Batch, Retry, Recovery, & Job Monitoring (Orang 4):** [`docs/m2-person4.md`](docs/m2-person4.md)
 - **[BONUS] SAST dengan GitHub CodeQL (Temuan, Perbaikan, & Rescan):** [`docs/codeql-sast.md`](docs/codeql-sast.md)
 - **Dokumen Desain Fondasi M1:** [`docs/auth-session.md`](docs/auth-session.md), [`docs/access-control.md`](docs/access-control.md), [`docs/db-management.md`](docs/db-management.md), [`docs/migration.md`](docs/migration.md), [`docs/schema-diff.md`](docs/schema-diff.md), [`docs/p1-integration-notes.md`](docs/p1-integration-notes.md)
 
