@@ -22,7 +22,7 @@ type Details = {
 
 export function MigrationsShellPage() {
   const { id } = useParams<{ id: string }>();
-  const { accessibleDatabases } = useAuth();
+  const { accessibleDatabases, user } = useAuth();
   const { notify } = useToast();
   const navigate = useNavigate();
 
@@ -276,7 +276,7 @@ export function MigrationsShellPage() {
                     Detail / Review
                   </button>
 
-                  {canEdit && r.status === 'draft' && (
+                  {canEdit && user?.id === r.requested_by && r.status === 'draft' && (
                     <>
                       <button
                         disabled={busy}
@@ -300,7 +300,7 @@ export function MigrationsShellPage() {
                     </>
                   )}
 
-                  {canEdit && ['pending_review', 'approved'].includes(r.status) && (
+                  {canEdit && user?.id === r.requested_by && ['pending_review', 'approved'].includes(r.status) && (
                     <button
                       disabled={busy}
                       className="btn-secondary text-xs"
@@ -387,7 +387,8 @@ export function MigrationsShellPage() {
               )}
 
               {canEdit &&
-                ['draft', 'pending_review', 'rejected'].includes(selected.request.status) &&
+                user?.id === selected.request.requested_by &&
+                ['draft', 'pending_review', 'approved', 'rejected'].includes(selected.request.status) &&
                 selected.request.action === 'up' && (
                   <button
                     className="btn-secondary"
@@ -452,13 +453,13 @@ export function MigrationsShellPage() {
                   </p>
                 )}
 
-                {canEdit && e.status === 'success' && e.action !== 'rollback' && (
+                {canEdit && e.available_action === 'rollback' && (
                   <button
                     disabled={busy}
                     className="btn-secondary text-xs"
                     onClick={() =>
                       void act('Ajukan rollback', () =>
-                        lifecycleApi.action(db, e.migration_id, 'rollback')
+                        lifecycleApi.action(db, e.migration_id, e.execution_id, 'rollback')
                       )
                     }
                   >
@@ -466,13 +467,13 @@ export function MigrationsShellPage() {
                   </button>
                 )}
 
-                {canEdit && e.status === 'success' && e.action === 'rollback' && (
+                {canEdit && e.available_action === 'forward' && (
                   <button
                     disabled={busy}
                     className="btn-secondary text-xs"
                     onClick={() =>
                       void act('Ajukan forward', () =>
-                        lifecycleApi.action(db, e.migration_id, 'forward')
+                        lifecycleApi.action(db, e.migration_id, e.execution_id, 'forward')
                       )
                     }
                   >
@@ -498,6 +499,7 @@ export function MigrationsShellPage() {
           open
           db={db}
           requestId={executing.id}
+          revisionId={executing.revision_id}
           action={executing.action}
           onClose={() => setExecuting(null)}
           onError={(m) => notify('error', m)}

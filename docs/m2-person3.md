@@ -46,10 +46,13 @@ and global CSRF middleware, with backend access checks. All operations use JSON.
 | GET | `/databases/{db}/history?hide_rollback=true` | History filtered by execution ID pair |
 | GET | `/review-inbox` | Current leader's pending review requests |
 
-The `POST /actions` body is `{"action":"rollback"}` or
-`{"action":"forward"}`. Creating an action is **not** executing it; each
-requires submit → approvals → explicit enqueue. Failed rollback attempts remain
-visible and never remove the previous active migration from the linear stack.
+The `POST /actions` body includes `action` (`rollback` or `forward`) and
+`execution_id` from the selected history row. The server returns HTTP 409 if
+that execution is no longer eligible. Each action requires submit, approvals,
+and explicit enqueue. After sequential rollbacks, forward restores one
+migration at a time in reverse rollback order. A successful new Up replaces
+the remaining forward branch. Failed rollback attempts stay visible and leave
+the active migration order intact.
 
 ### Frontend
 
@@ -59,6 +62,11 @@ Pages: `MigrationsShellPage.tsx`, `ApprovalsInboxPage.tsx` via existing React
 Router. The UI never displays enqueue as SQL execution success. Hide rollback
 filters only a successful rollback and its referenced execution ID; a later
 forward of the same migration remains visible.
+History rows expose `available_action` for the reversible active tip and the
+next rollback eligible for forward.
+
+Both `/queue` and `/execute` require the selected `revision_id` in the JSON
+body. A stale revision returns HTTP 409 without publishing a job.
 
 ## Approval logic
 
@@ -69,7 +77,10 @@ forward of the same migration remains visible.
 - The request owner can refresh a pending review after leader/access changes;
   refreshing resets decisions so the current stakeholders must approve.
 - Self-approval is allowed per QnA2.
-- Revision change discards old approval records and returns to Draft.
+- Revising an unexecuted request returns it to Draft. Current approvals are
+  cleared and previous decisions remain in the decision history.
+- Approve and reject require the `revision_id` shown to the reviewer. A decision
+  for an outdated revision returns HTTP 409.
 - Enqueue and worker claim reject approval snapshots when group membership or
   leader has changed; they do **not** silently reuse stale approvals. The
   request owner can refresh the stakeholder snapshot without changing SQL.
@@ -82,7 +93,10 @@ forward of the same migration remains visible.
 executing any target query. To avoid executing DDL for validation, **one SQL
 statement per Up and one per Down** are supported. A multi-statement script
 must be decomposed into separate migrations; multi-statement parser errors are
-reported as HTTP 400. The check requires a reachable PostgreSQL target pool.
+reported as HTTP 400. Validation errors include the SQL field, SQLSTATE, and
+character position when PostgreSQL provides it. Submit moves only the validated
+revision into review and returns HTTP 409 if the draft changed during validation.
+The check requires a reachable PostgreSQL target pool.
 This is syntax validation, **not** semantic dry-run/permissions on every
 affected object, and does not guarantee a successful execution.
 

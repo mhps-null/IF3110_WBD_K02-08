@@ -141,6 +141,10 @@ func (h Handler) execute(w http.ResponseWriter, r *http.Request) {
 		h.writeErr(w, r, err)
 		return
 	}
+	if in.RevisionID <= 0 {
+		h.writeErr(w, r, fmt.Errorf("revision_id must be positive: %w", ErrInvalid))
+		return
+	}
 	actor := principal(r)
 	j, err := h.Service.Execute(r.Context(), actor, db, req, in)
 	if err != nil {

@@ -54,28 +54,31 @@ func TestHideRollbackKeepsFailedAttemptsForSameExecution(t *testing.T) {
 }
 
 func TestLinearOrder(t *testing.T) {
-	v := []committed{{id: 1, migration: 10, action: Up}, {id: 2, migration: 20, action: Up}}
-	stack, err := activeStack(v)
-	if err != nil || len(stack) != 2 {
-		t.Fatalf("%v %v", stack, err)
+	first, second, third := int64(1), int64(2), int64(3)
+	rollbackThird, rollbackSecond := int64(4), int64(5)
+	items := []committed{
+		{id: first, action: Up},
+		{id: second, action: Up, reversible: true},
+		{id: third, action: Up, reversible: true},
+		{id: rollbackThird, action: Rollback, target: &third},
+		{id: rollbackSecond, action: Rollback, target: &second},
 	}
 
-	target := int64(2)
-	v = append(v, committed{id: 3, migration: 20, action: Rollback, target: &target})
-	stack, err = activeStack(v)
-	if err != nil || len(stack) != 1 || stack[0].id != 1 {
-		t.Fatalf("%v %v", stack, err)
-	}
-
-	v = append(v, committed{id: 4, migration: 20, action: Forward})
-	stack, err = activeStack(v)
-	if err != nil || len(stack) != 2 || stack[1].id != 4 {
-		t.Fatalf("%v %v", stack, err)
-	}
-
-	target = 1
-	v = append(v, committed{id: 5, migration: 10, action: Rollback, target: &target})
-	if _, err = activeStack(v); err == nil {
+	if _, err := replayHistory(append(items[:3:3], committed{action: Rollback, target: &first})); err == nil {
 		t.Fatal("out-of-order rollback accepted")
+	}
+	if _, err := replayHistory(append(items, committed{id: 6, action: Forward, target: &rollbackThird})); err == nil {
+		t.Fatal("out-of-order forward accepted")
+	}
+
+	items = append(items, committed{id: 6, action: Forward, target: &rollbackSecond, reversible: true})
+	history, err := replayHistory(items)
+	if err != nil || history.source(Rollback).id != 6 || history.source(Forward).id != rollbackThird {
+		t.Fatalf("expected rollback of forward #6 and forward of rollback #%d: %+v, %v", rollbackThird, history, err)
+	}
+
+	history, err = replayHistory(append(items, committed{id: 7, action: Up}))
+	if err != nil || history.source(Forward).id != 0 || history.source(Rollback).id != 0 {
+		t.Fatalf("a new irreversible migration should replace the forward branch and block rollback: %+v, %v", history, err)
 	}
 }

@@ -5,15 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/mhps-null/IF3110_WBD_K02-08/internal/audit"
-	"github.com/mhps-null/IF3110_WBD_K02-08/internal/connections"
-	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
-	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
 	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/audit"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/connections"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/contract"
+	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
 )
 
 type Handler struct {
@@ -81,6 +82,16 @@ func respond(w http.ResponseWriter, status int, v any) {
 }
 
 func failure(w http.ResponseWriter, err error) {
+	var validation *sqlValidationError
+	if errors.As(err, &validation) {
+		respond(w, http.StatusBadRequest, map[string]any{"error": validation.Error(), "validation": validation})
+		return
+	}
+	if errors.Is(err, errRevisionChanged) {
+		respond(w, http.StatusConflict, map[string]string{"error": "Revisi migration sudah berubah. Muat ulang dan periksa versi terbaru."})
+		return
+	}
+
 	status := 500
 	switch {
 	case errors.Is(err, ErrInvalid):
@@ -191,7 +202,8 @@ func (h Handler) action(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var in struct {
-		Action string `json:"action"`
+		Action      string `json:"action"`
+		ExecutionID int64  `json:"execution_id"`
 	}
 
 	if err = decode(r, &in); err != nil {
@@ -200,12 +212,12 @@ func (h Handler) action(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mid := number(r.PathValue("migration"))
-	if mid == 0 {
+	if mid == 0 || in.ExecutionID <= 0 {
 		failure(w, ErrInvalid)
 		return
 	}
 
-	q, err := h.Store.CreateAction(r.Context(), actor(r), db, mid, in.Action)
+	q, err := h.Store.createAction(r.Context(), actor(r), db, mid, in.Action, in.ExecutionID)
 	if err != nil {
 		failure(w, err)
 		return
@@ -263,9 +275,13 @@ func (h Handler) detail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	definition, err := h.Store.RevisionDetails(r.Context(), q.ID)
+	definition, revisionID, err := h.Store.revisionDetails(r.Context(), q.ID)
 	if err != nil {
 		failure(w, err)
+		return
+	}
+	if q.RevisionID != revisionID {
+		failure(w, errRevisionChanged)
 		return
 	}
 
@@ -278,12 +294,13 @@ func (h Handler) submit(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	if err := h.validateRequest(r.Context(), q.ID); err != nil {
+	revisionID, err := h.validateRequest(r.Context(), q.ID)
+	if err != nil {
 		failure(w, err)
 		return
 	}
 
-	out, err := h.Store.Submit(r.Context(), q.ID, actor(r))
+	out, err := h.Store.submit(r.Context(), q.ID, actor(r), revisionID)
 	if err != nil {
 		failure(w, err)
 		return
@@ -321,7 +338,15 @@ func (h Handler) approval(w http.ResponseWriter, r *http.Request, approve bool) 
 		return
 	}
 
-	out, err := h.Store.Approve(r.Context(), q.ID, actor(r), approve)
+	var in struct {
+		RevisionID int64 `json:"revision_id"`
+	}
+	if err = decode(r, &in); err != nil || in.RevisionID <= 0 {
+		failure(w, ErrInvalid)
+		return
+	}
+
+	out, err := h.Store.approve(r.Context(), q.ID, actor(r), approve, in.RevisionID)
 	if err != nil {
 		failure(w, err)
 		return
@@ -350,7 +375,15 @@ func (h Handler) queue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := h.Store.Queue(r.Context(), q.ID, actor(r))
+	var in struct {
+		RevisionID int64 `json:"revision_id"`
+	}
+	if err = decode(r, &in); err != nil || in.RevisionID <= 0 {
+		failure(w, ErrInvalid)
+		return
+	}
+
+	id, err := h.Store.queueRevision(r.Context(), q.ID, actor(r), in.RevisionID)
 	if err != nil {
 		failure(w, err)
 		return
@@ -413,9 +446,10 @@ func (h Handler) validate(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	if err = h.validateRequest(r.Context(), q.ID); err != nil {
+	revisionID, err := h.validateRequest(r.Context(), q.ID)
+	if err != nil {
 		failure(w, err)
 		return
 	}
-	respond(w, http.StatusOK, map[string]any{"valid": true, "request_id": q.ID})
+	respond(w, http.StatusOK, map[string]any{"valid": true, "request_id": q.ID, "revision_id": revisionID})
 }

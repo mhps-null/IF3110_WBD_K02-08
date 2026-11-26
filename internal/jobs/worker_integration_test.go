@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,16 @@ import (
 // The DSN user must be allowed to CREATE/DROP DATABASE.
 
 type fakeTargets struct{ dbs map[int64]*sql.DB }
+
+type lifecycleBeforeQueue struct {
+	LifecycleAPI
+	before func()
+}
+
+func (l lifecycleBeforeQueue) QueueWith(ctx context.Context, id, actor int64, hook lifecycle.QueueHook) (int64, error) {
+	l.before()
+	return l.LifecycleAPI.QueueWith(ctx, id, actor, hook)
+}
 
 func (f fakeTargets) Open(_ context.Context, id int64) (*sql.DB, contract.Engine, error) {
 	db, ok := f.dbs[id]
@@ -874,5 +885,40 @@ func TestDispatchPicksUpLifecycleQueueEndpoint(t *testing.T) {
 	}
 	if done := e.drive(e.worker("w1"), jobID); done.Status != StatusSuccess || done.Mode != ModeNormal {
 		t.Fatalf("outbox dispatch: %+v", done)
+	}
+}
+
+func TestExecuteRejectsRevisionChangedBeforeEnqueue(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	req := e.approved(e.db1, "bound execution", "SELECT 1", "SELECT 1")
+	var approved lifecycle.Request
+	e.svc.Lifecycle = lifecycleBeforeQueue{LifecycleAPI: e.life, before: func() {
+		revised, err := e.life.Revise(ctx, req.ID, e.author, lifecycle.DefinitionInput{
+			DBID: e.db1, Title: "revised", SQLUp: "SELECT 2", SQLDown: "SELECT 1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		approved = e.approve(revised)
+	}}
+
+	h := Handler{Service: e.svc}
+	path := fmt.Sprintf("/api/v2/databases/%d/requests/%d/execute", e.db1, req.ID)
+	oldBody := fmt.Sprintf(`{"revision_id":%d}`, req.RevisionID)
+	for _, stage := range []string{"during enqueue", "before enqueue"} {
+		rec := serve(h, http.MethodPost, path, oldBody, e.author)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "revisi") {
+			t.Fatalf("%s: expected stale revision conflict, got %d %s", stage, rec.Code, rec.Body.String())
+		}
+		e.svc.Lifecycle = e.life
+	}
+	var outbox int
+	if err := e.meta.QueryRow(`SELECT count(*) FROM migration_job_outbox WHERE request_id=$1`, req.ID).Scan(&outbox); err != nil || outbox != 0 {
+		t.Fatalf("stale requests must leave the outbox empty: %d, %v", outbox, err)
+	}
+	newBody := fmt.Sprintf(`{"revision_id":%d}`, approved.RevisionID)
+	if rec := serve(h, http.MethodPost, path, newBody, e.author); rec.Code != http.StatusAccepted {
+		t.Fatalf("current revision should enqueue: %d %s", rec.Code, rec.Body.String())
 	}
 }
