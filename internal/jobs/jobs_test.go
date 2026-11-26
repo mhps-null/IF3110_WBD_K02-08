@@ -259,8 +259,9 @@ func TestHTTPAuthorizationAndValidation(t *testing.T) {
 		user                     int64
 		want                     int
 	}{
-		{"execute without permission", http.MethodPost, "/api/v2/databases/1/requests/2/execute", `{}`, 7, http.StatusForbidden},
-		{"execute anonymous", http.MethodPost, "/api/v2/databases/1/requests/2/execute", `{}`, 0, http.StatusForbidden},
+		{"execute without permission", http.MethodPost, "/api/v2/databases/1/requests/2/execute", `{"revision_id":1}`, 7, http.StatusForbidden},
+		{"execute anonymous", http.MethodPost, "/api/v2/databases/1/requests/2/execute", `{"revision_id":1}`, 0, http.StatusForbidden},
+		{"execute missing revision", http.MethodPost, "/api/v2/databases/1/requests/2/execute", `{}`, 7, http.StatusBadRequest},
 		{"execute bad path", http.MethodPost, "/api/v2/databases/x/requests/2/execute", `{}`, 7, http.StatusBadRequest},
 		{"execute malformed body", http.MethodPost, "/api/v2/databases/1/requests/2/execute", `{"mode":`, 7, http.StatusBadRequest},
 		{"execute unknown field", http.MethodPost, "/api/v2/databases/1/requests/2/execute", `{"sql":"DROP TABLE x"}`, 7, http.StatusBadRequest},
@@ -282,7 +283,7 @@ func TestHTTPAuthorizationAndValidation(t *testing.T) {
 	}
 	// Execute by an editor for a missing request -> 404 (no SQL ever runs in the API).
 	allow := Handler{Service: &Service{Lifecycle: fakeLifecycle{can: true}}}
-	if rec := serve(allow, http.MethodPost, "/api/v2/databases/1/requests/99/execute", ``, 7); rec.Code != http.StatusNotFound {
+	if rec := serve(allow, http.MethodPost, "/api/v2/databases/1/requests/99/execute", `{"revision_id":1}`, 7); rec.Code != http.StatusNotFound {
 		t.Fatalf("missing request: %d %s", rec.Code, rec.Body.String())
 	}
 }

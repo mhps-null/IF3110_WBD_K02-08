@@ -94,6 +94,10 @@ func (s *Service) Execute(ctx context.Context, actor, dbID, requestID int64, in 
 	if req.DBID != dbID {
 		return Job{}, ErrNotFound
 	}
+	revisionChanged := fmt.Errorf("revisi migration sudah berubah. Muat ulang dan periksa versi terbaru: %w", ErrConflict)
+	if in.RevisionID != 0 && req.RevisionID != in.RevisionID {
+		return Job{}, revisionChanged
+	}
 	if req.Status != lifecycle.Approved {
 		return Job{}, fmt.Errorf("only an approved request can be executed (current: %s): %w", req.Status, ErrConflict)
 	}
@@ -160,9 +164,16 @@ func (s *Service) Execute(ctx context.Context, actor, dbID, requestID int64, in 
 
 	trace, corr := traceFrom(ctx)
 	jobID, err := s.Lifecycle.QueueWith(ctx, req.ID, actor, func(ctx context.Context, tx *sql.Tx, q lifecycle.Request, jobID int64) error {
+		// QueueWith holds the request row lock and rolls back the enqueue if the hook fails.
+		if q.RevisionID != req.RevisionID {
+			return revisionChanged
+		}
 		return UpsertQueuedTx(ctx, tx, q, jobID, NewJob{Options: opts, SourceJobID: sourceJob, TraceParent: trace, CorrelationID: corr, EnqueuedBy: actor})
 	})
 	if err != nil {
+		if errors.Is(err, revisionChanged) {
+			return Job{}, err
+		}
 		if errors.Is(err, ErrConflict) {
 			return Job{}, fmt.Errorf("a job for this request already ran; use resume instead: %w", ErrConflict)
 		}

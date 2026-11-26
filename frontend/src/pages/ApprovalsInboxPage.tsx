@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { lifecycleApi, type LifecycleRequest, type LifecycleApproval, type LifecycleApprovalDecision } from '../api/lifecycle';
+import { ApiError } from '../api/client';
 import { useToast } from '../context/ToastContext';
 import { PageHeader, EmptyState, ErrorState, LoadingState } from '../components/shared/UIStates';
 
@@ -56,12 +57,17 @@ export function ApprovalsInboxPage() {
     setBusy(true);
 
     try {
-      await lifecycleApi.decide(detail.request.db_id, detail.request.id, decision);
+      const { db_id, id, revision_id } = detail.request;
+      await lifecycleApi.decide(db_id, id, revision_id, decision);
       notify('success', `Request #${detail.request.id} ${decision}`);
       setDetail(null);
       await refresh();
     } catch (e) {
       notify('error', e instanceof Error ? e.message : 'Gagal memproses approval');
+      if (e instanceof ApiError && e.status === 409) {
+        setDetail(null);
+        await refresh();
+      }
     } finally {
       setBusy(false);
     }

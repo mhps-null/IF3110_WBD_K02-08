@@ -98,7 +98,7 @@ func (s *Store) Revise(ctx context.Context, requestID, actor int64, d Definition
 	if err != nil {
 		return out, err
 	}
-	if db != d.DBID || owner != actor || action != Up || (status != Draft && status != PendingReview && status != Rejected) {
+	if db != d.DBID || owner != actor || action != Up || (status != Draft && status != PendingReview && status != Approved && status != Rejected) {
 		return out, ErrConflict
 	}
 
@@ -172,6 +172,11 @@ func lockDB(ctx context.Context, tx *sql.Tx, db int64) error {
 }
 
 func (s *Store) Submit(ctx context.Context, requestID, actor int64) (Request, error) {
+	return s.submit(ctx, requestID, actor, 0)
+}
+
+// submit compares the validated revision under the same lock used by Revise.
+func (s *Store) submit(ctx context.Context, requestID, actor, validatedRevisionID int64) (Request, error) {
 	var out Request
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -188,6 +193,9 @@ func (s *Store) Submit(ctx context.Context, requestID, actor int64) (Request, er
 	}
 	if out.RequestedBy != actor || out.Status != Draft {
 		return out, ErrConflict
+	}
+	if validatedRevisionID != 0 && out.RevisionID != validatedRevisionID {
+		return out, errRevisionChanged
 	}
 
 	var permitted bool
@@ -287,6 +295,10 @@ func refreshReviewTx(ctx context.Context, tx *sql.Tx, requestID, dbID int64) err
 }
 
 func (s *Store) Approve(ctx context.Context, id, actor int64, approve bool) (Request, error) {
+	return s.approve(ctx, id, actor, approve, 0)
+}
+
+func (s *Store) approve(ctx context.Context, id, actor int64, approve bool, reviewedRevisionID int64) (Request, error) {
 	var out Request
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -303,6 +315,9 @@ func (s *Store) Approve(ctx context.Context, id, actor int64, approve bool) (Req
 	}
 	if out.Status != PendingReview {
 		return out, ErrConflict
+	}
+	if reviewedRevisionID != 0 && out.RevisionID != reviewedRevisionID {
+		return out, errRevisionChanged
 	}
 
 	// Snapshot group leader at submit time. A user may approve for multiple groups.
@@ -432,6 +447,15 @@ func (s *Store) Queue(ctx context.Context, id, actor int64) (int64, error) {
 	return s.QueueWith(ctx, id, actor, nil)
 }
 
+func (s *Store) queueRevision(ctx context.Context, id, actor, revisionID int64) (int64, error) {
+	return s.QueueWith(ctx, id, actor, func(_ context.Context, _ *sql.Tx, q Request, _ int64) error {
+		if q.RevisionID != revisionID {
+			return errRevisionChanged
+		}
+		return nil
+	})
+}
+
 // QueueHook runs inside the Queue transaction after the outbox row exists, so the
 // worker-side job record (mode, batch plan, trace context) commits atomically with
 // the pending transition. A hook error aborts the whole enqueue.
@@ -511,9 +535,11 @@ func (s *Store) QueueWith(ctx context.Context, id, actor int64, hook QueueHook) 
 
 func (s *Store) ListHistory(ctx context.Context, dbID int64, hide bool) ([]Execution, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,a.id,r.request_id,r.migration_id,r.revision_id,a.actor_id,
-		r.action,a.status,r.sql_snapshot,r.rollback_of_execution_id,a.attempt_number,a.created_at,a.error_message
+		r.action,a.status,r.sql_snapshot,r.rollback_of_execution_id,a.attempt_number,a.created_at,a.error_message,
+		v.sql_down IS NOT NULL
 		FROM migration_execution_runs r
 		JOIN migration_execution_attempts a ON a.run_id=r.id
+		JOIN migration_revisions v ON v.id=r.revision_id
 		WHERE r.db_id=$1 ORDER BY a.id`, dbID)
 	if err != nil {
 		return nil, err
@@ -521,19 +547,41 @@ func (s *Store) ListHistory(ctx context.Context, dbID int64, hide bool) ([]Execu
 
 	defer rows.Close()
 	out := []Execution{}
+	var completed []committed
 	for rows.Next() {
 		var e Execution
 		var at time.Time
+		var reversible bool
 		if err = rows.Scan(&e.ID, &e.AttemptID, &e.RequestID, &e.MigrationID, &e.RevisionID, &e.ActorID,
-			&e.Action, &e.Status, &e.SQLSnapshot, &e.RollbackOf, &e.Attempt, &at, &e.ErrorMessage); err != nil {
+			&e.Action, &e.Status, &e.SQLSnapshot, &e.RollbackOf, &e.Attempt, &at, &e.ErrorMessage, &reversible); err != nil {
 			return nil, err
 		}
 		e.ExecutedAt = at.UTC().Format(time.RFC3339Nano)
 		out = append(out, e)
+		if e.Status == Success {
+			completed = append(completed, committed{id: e.ID, migration: e.MigrationID, revision: e.RevisionID,
+				action: e.Action, target: e.RollbackOf, reversible: reversible})
+		}
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, err
+	}
+	// Preserve readable history even when old data cannot establish a valid action.
+	if history, err := replayHistory(completed); err == nil {
+		rollbackID := history.source(Rollback).id
+		forwardID := history.source(Forward).id
+		for i := range out {
+			if out[i].Status != Success {
+				continue
+			}
+			switch out[i].ID {
+			case rollbackID:
+				out[i].AvailableAction = Rollback
+			case forwardID:
+				out[i].AvailableAction = Forward
+			}
+		}
 	}
 	if hide {
 		return HideRollback(out), nil
@@ -621,19 +669,25 @@ func (s *Store) RecordAttempt(ctx context.Context, requestID, actor int64, statu
 
 // RevisionDetails returns a frozen SQL definition. A worker must execute this exact snapshot, rather than accept arbitrary SQL from the job payload
 func (s *Store) RevisionDetails(ctx context.Context, requestID int64) (DefinitionInput, error) {
+	d, _, err := s.revisionDetails(ctx, requestID)
+	return d, err
+}
+
+func (s *Store) revisionDetails(ctx context.Context, requestID int64) (DefinitionInput, int64, error) {
 	var d DefinitionInput
+	var revisionID int64
 	var down, reason sql.NullString
-	err := s.DB.QueryRowContext(ctx, `SELECT r.db_id,d.title,v.sql_up,v.sql_down,v.irreversible_reason FROM migration_requests r JOIN migration_definitions d ON d.id=r.migration_id JOIN migration_revisions v ON v.id=r.revision_id WHERE r.id=$1`, requestID).Scan(&d.DBID, &d.Title, &d.SQLUp, &down, &reason)
+	err := s.DB.QueryRowContext(ctx, `SELECT r.db_id,d.title,v.id,v.sql_up,v.sql_down,v.irreversible_reason FROM migration_requests r JOIN migration_definitions d ON d.id=r.migration_id JOIN migration_revisions v ON v.id=r.revision_id WHERE r.id=$1`, requestID).Scan(&d.DBID, &d.Title, &revisionID, &d.SQLUp, &down, &reason)
 	if errors.Is(err, sql.ErrNoRows) {
-		return d, ErrNotFound
+		return d, 0, ErrNotFound
 	}
 	if err != nil {
-		return d, err
+		return d, 0, err
 	}
 
 	d.SQLDown = down.String
 	d.IrreversibleReason = reason.String
-	return d, nil
+	return d, revisionID, nil
 }
 
 // Claim is the worker-side, atomic state transition; queue deliveries are at-least-once

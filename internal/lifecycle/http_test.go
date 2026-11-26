@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -9,9 +10,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/audit"
 	"github.com/mhps-null/IF3110_WBD_K02-08/internal/observability"
 )
+
+func TestValidationFailureReportsFieldAndPosition(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	err := sqlValidationFailure("sql_down", &pgconn.PgError{
+		Code: "42601", Position: 8, Message: "raw diagnostic",
+	})
+	failure(recorder, err)
+
+	var response struct {
+		Error      string             `json:"error"`
+		Validation sqlValidationError `json:"validation"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != 400 || response.Validation.Field != "sql_down" ||
+		response.Validation.SQLState != "42601" || response.Validation.Position != 8 ||
+		!strings.Contains(response.Error, "SQL Down") || strings.Contains(recorder.Body.String(), "raw diagnostic") {
+		t.Fatalf("unexpected validation response: %d %s", recorder.Code, recorder.Body)
+	}
+}
 
 func TestAuditPersistenceFailureIsReturnedAndSurfaced(t *testing.T) {
 	auditStore := audit.NewMemoryStore()

@@ -138,6 +138,7 @@ type Event struct {
 
 // ExecuteOptions is the body of the Execute endpoint.
 type ExecuteOptions struct {
+	RevisionID  int64  `json:"revision_id"`
 	Mode        string `json:"mode"`
 	BatchTable  string `json:"batch_table"`
 	BatchColumn string `json:"batch_column"`

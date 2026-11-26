@@ -10,12 +10,14 @@ type committed struct {
 	id, migration, revision int64
 	action                  string
 	target                  *int64
+	reversible              bool
 }
 
 func committedTx(ctx context.Context, tx *sql.Tx, db int64) ([]committed, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT r.id,r.migration_id,r.revision_id,r.action,r.rollback_of_execution_id
+		SELECT r.id,r.migration_id,r.revision_id,r.action,r.rollback_of_execution_id,v.sql_down IS NOT NULL
 		FROM migration_execution_runs r
+		JOIN migration_revisions v ON v.id=r.revision_id
 		JOIN LATERAL (
 			SELECT a.status,a.id
 			FROM migration_execution_attempts a
@@ -33,7 +35,7 @@ func committedTx(ctx context.Context, tx *sql.Tx, db int64) ([]committed, error)
 	list := []committed{}
 	for rows.Next() {
 		var v committed
-		if err = rows.Scan(&v.id, &v.migration, &v.revision, &v.action, &v.target); err != nil {
+		if err = rows.Scan(&v.id, &v.migration, &v.revision, &v.action, &v.target, &v.reversible); err != nil {
 			return nil, err
 		}
 		list = append(list, v)
@@ -42,23 +44,57 @@ func committedTx(ctx context.Context, tx *sql.Tx, db int64) ([]committed, error)
 	return list, rows.Err()
 }
 
-func activeStack(items []committed) ([]committed, error) {
-	stack := []committed{}
+type linearHistory struct {
+	active     []committed
+	rolledBack []committed
+}
+
+func lastExecution(stack []committed) committed {
+	if len(stack) == 0 {
+		return committed{}
+	}
+	return stack[len(stack)-1]
+}
+
+func (h linearHistory) source(action string) committed {
+	switch action {
+	case Rollback:
+		if e := lastExecution(h.active); e.reversible {
+			return e
+		}
+	case Forward:
+		return lastExecution(h.rolledBack)
+	}
+	return committed{}
+}
+
+func replayHistory(items []committed) (linearHistory, error) {
+	var history linearHistory
 	for _, e := range items {
 		switch e.action {
-		case Up, Forward:
-			stack = append(stack, e)
+		case Up:
+			history.active = append(history.active, e)
+			// A new migration replaces the abandoned branch.
+			history.rolledBack = nil
 		case Rollback:
-			if e.target == nil || len(stack) == 0 || stack[len(stack)-1].id != *e.target {
-				return nil, ErrConflict
+			top := lastExecution(history.active)
+			if top.id == 0 || e.target == nil || top.id != *e.target {
+				return linearHistory{}, ErrConflict
 			}
-			stack = stack[:len(stack)-1]
+			history.active = history.active[:len(history.active)-1]
+			history.rolledBack = append(history.rolledBack, e)
+		case Forward:
+			next := lastExecution(history.rolledBack)
+			if next.id == 0 || e.target == nil || next.id != *e.target {
+				return linearHistory{}, ErrConflict
+			}
+			history.rolledBack = history.rolledBack[:len(history.rolledBack)-1]
+			history.active = append(history.active, e)
 		default:
-			return nil, ErrConflict
+			return linearHistory{}, ErrConflict
 		}
 	}
-
-	return stack, nil
+	return history, nil
 }
 
 func eligibleTx(ctx context.Context, tx *sql.Tx, q Request) error {
@@ -66,7 +102,7 @@ func eligibleTx(ctx context.Context, tx *sql.Tx, q Request) error {
 	if err != nil {
 		return err
 	}
-	stack, err := activeStack(items)
+	history, err := replayHistory(items)
 	if err != nil {
 		return err
 	}
@@ -92,33 +128,11 @@ func eligibleTx(ctx context.Context, tx *sql.Tx, q Request) error {
 			}
 		}
 
-	case Rollback:
-		if len(stack) == 0 || q.TargetExecutionID == nil || stack[len(stack)-1].id != *q.TargetExecutionID {
+	case Rollback, Forward:
+		source := history.source(q.Action)
+		if source.id == 0 || q.TargetExecutionID == nil || source.id != *q.TargetExecutionID ||
+			source.migration != q.MigrationID || source.revision != q.RevisionID {
 			return ErrConflict
-		}
-		if stack[len(stack)-1].migration != q.MigrationID || stack[len(stack)-1].revision != q.RevisionID {
-			return ErrConflict
-		}
-		var hasDown bool
-		err = tx.QueryRowContext(ctx, `SELECT sql_down IS NOT NULL FROM migration_revisions WHERE id=$1`, q.RevisionID).Scan(&hasDown)
-		if err != nil {
-			return err
-		}
-		if !hasDown {
-			return ErrConflict
-		}
-
-	case Forward:
-		if len(items) == 0 || items[len(items)-1].action != Rollback || items[len(items)-1].migration != q.MigrationID || items[len(items)-1].revision != q.RevisionID {
-			return ErrConflict
-		}
-		if q.TargetExecutionID == nil || items[len(items)-1].id != *q.TargetExecutionID {
-			return ErrConflict
-		}
-		for _, e := range stack {
-			if e.migration == q.MigrationID {
-				return ErrConflict
-			}
 		}
 
 	default:
@@ -131,6 +145,10 @@ func eligibleTx(ctx context.Context, tx *sql.Tx, q Request) error {
 // CreateAction binds rollback/forward to an immutable, committed revision
 // Rollback refers to the active up/forward execution; forward refers to the successful rollback
 func (s *Store) CreateAction(ctx context.Context, actor, db, migration int64, action string) (Request, error) {
+	return s.createAction(ctx, actor, db, migration, action, 0)
+}
+
+func (s *Store) createAction(ctx context.Context, actor, db, migration int64, action string, executionID int64) (Request, error) {
 	var q Request
 	if action != Rollback && action != Forward {
 		return q, ErrInvalid
@@ -171,22 +189,14 @@ func (s *Store) CreateAction(ctx context.Context, actor, db, migration int64, ac
 	if err != nil {
 		return q, err
 	}
-	stack, err := activeStack(items)
+	history, err := replayHistory(items)
 	if err != nil {
 		return q, err
 	}
 
-	var source committed
-	if action == Rollback {
-		if len(stack) == 0 || stack[len(stack)-1].migration != migration {
-			return q, ErrConflict
-		}
-		source = stack[len(stack)-1]
-	} else {
-		if len(items) == 0 || items[len(items)-1].action != Rollback || items[len(items)-1].migration != migration {
-			return q, ErrConflict
-		}
-		source = items[len(items)-1]
+	source := history.source(action)
+	if source.id == 0 || source.migration != migration || (executionID != 0 && source.id != executionID) {
+		return q, ErrConflict
 	}
 
 	q = Request{DBID: db, MigrationID: migration, RevisionID: source.revision, Action: action, TargetExecutionID: &source.id, RequestedBy: actor, Status: Draft}

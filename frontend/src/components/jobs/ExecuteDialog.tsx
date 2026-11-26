@@ -6,6 +6,7 @@ interface Props {
   open: boolean;
   db: number;
   requestId: number;
+  revisionId: number;
   action: 'up' | 'rollback' | 'forward';
   onClose: () => void;
   onQueued: (jobId: number) => void;
@@ -18,7 +19,7 @@ const IDENT = /^[A-Za-z_][A-Za-z0-9_]{0,62}(\.[A-Za-z_][A-Za-z0-9_]{0,62})?$/;
  * Publishes an approved request as an asynchronous job. The API returns a job ID
  * immediately; success is only reported later by the worker on the Jobs page.
  */
-export function ExecuteDialog({ open, db, requestId, action, onClose, onQueued, onError }: Props) {
+export function ExecuteDialog({ open, db, requestId, revisionId, action, onClose, onQueued, onError }: Props) {
   const [mode, setMode] = useState<'default' | 'normal' | 'batch'>(action === 'up' ? 'normal' : 'default');
   const [table, setTable] = useState('');
   const [column, setColumn] = useState('id');
@@ -31,7 +32,7 @@ export function ExecuteDialog({ open, db, requestId, action, onClose, onQueued, 
 
   const submit = async () => {
     setError('');
-    const opts: ExecuteOptions = { max_attempts: attempts };
+    const opts: ExecuteOptions = { revision_id: revisionId, max_attempts: attempts };
     if (action !== 'rollback') {
       if (mode === 'batch') {
         if (!IDENT.test(table.trim()) || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(column.trim())) {

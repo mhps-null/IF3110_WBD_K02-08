@@ -24,6 +24,7 @@ export interface LifecycleExecution {
   user_id: number; action: string; status: string; sql_snapshot: string;
   rollback_of_execution_id?: number | null; attempt: number; executed_at: string;
   error_message?: string | null;
+  available_action?: 'rollback' | 'forward';
 }
 
 const dbURL = (id: number) => `/api/v2/databases/${id}`;
@@ -31,16 +32,25 @@ export const lifecycleApi = {
   list: (db: number) => apiRequest<{items: LifecycleRequest[]}>(`${dbURL(db)}/requests`),
   history: (db: number, hide: boolean) => apiRequest<{items: LifecycleExecution[]}>(`${dbURL(db)}/history?hide_rollback=${hide}`),
   create: (db: number, data: Omit<LifecycleDefinition, 'db_id'>) => apiRequest<LifecycleRequest>(`${dbURL(db)}/migrations`, {method: 'POST', body: data}),
-  action: (db: number, migration: number, action: 'rollback' | 'forward') => apiRequest<LifecycleRequest>(`${dbURL(db)}/migrations/${migration}/actions`, {method: 'POST', body: {action}}),
+  action: (db: number, migration: number, execution: number, action: 'rollback' | 'forward') =>
+    apiRequest<LifecycleRequest>(`${dbURL(db)}/migrations/${migration}/actions`, {
+      method: 'POST', body: { action, execution_id: execution },
+    }),
   revise: (db: number, id: number, data: Omit<LifecycleDefinition, 'db_id'>) => apiRequest<LifecycleRequest>(`${dbURL(db)}/requests/${id}`, {method: 'PATCH', body: data}),
   detail: (db: number, id: number) => apiRequest<{
     request: LifecycleRequest; approvals: LifecycleApproval[];
     approval_history: LifecycleApprovalDecision[]; definition: LifecycleDefinition;
   }>(`${dbURL(db)}/requests/${id}`),
-  validate: (db: number, id: number) => apiRequest<{valid: boolean}>(`${dbURL(db)}/requests/${id}/validate`, {method: 'POST'}),
+  validate: (db: number, id: number) => apiRequest<{valid: boolean; revision_id: number}>(`${dbURL(db)}/requests/${id}/validate`, {method: 'POST'}),
   submit: (db: number, id: number) => apiRequest<LifecycleRequest>(`${dbURL(db)}/requests/${id}/submit`, {method: 'POST'}),
   refreshReview: (db: number, id: number) => apiRequest<LifecycleRequest>(`${dbURL(db)}/requests/${id}/refresh-review`, {method: 'POST'}),
-  decide: (db: number, id: number, decision: 'approve' | 'reject') => apiRequest<LifecycleRequest>(`${dbURL(db)}/requests/${id}/${decision}`, {method: 'POST'}),
-  queue: (db: number, id: number) => apiRequest<{job_id: number; status: string}>(`${dbURL(db)}/requests/${id}/queue`, {method: 'POST'}),
+  decide: (db: number, id: number, revision: number, decision: 'approve' | 'reject') =>
+    apiRequest<LifecycleRequest>(`${dbURL(db)}/requests/${id}/${decision}`, {
+      method: 'POST', body: { revision_id: revision },
+    }),
+  queue: (db: number, id: number, revision: number) =>
+    apiRequest<{job_id: number; status: string}>(`${dbURL(db)}/requests/${id}/queue`, {
+      method: 'POST', body: { revision_id: revision },
+    }),
   inbox: () => apiRequest<{items: LifecycleRequest[]}>('/api/v2/review-inbox'),
 };

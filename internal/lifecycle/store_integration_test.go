@@ -300,3 +300,150 @@ func TestRecordAttemptReusesExecutionAndPersistsAttemptActor(t *testing.T) {
 		t.Fatalf("attempt outcomes were not preserved: %+v", history)
 	}
 }
+
+func TestSubmitRequiresValidatedRevision(t *testing.T) {
+	db := setupLifecycleDB(t)
+	ctx := context.Background()
+	store := NewStore(db)
+	author := lifecycleUser(t, db, "revision-author")
+	dbID := lifecycleDatabase(t, db)
+	lifecycleGroup(t, db, "revision-group", dbID, 2, &author, author)
+
+	req := lifecycleRequest(t, store, ctx, author, dbID, "validated draft")
+	definition, validatedID, err := store.revisionDetails(ctx, req.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSQL(ctx, db, "sql_up", definition.SQLUp); err != nil {
+		t.Fatal(err)
+	}
+
+	definition.SQLUp = "SELCT 2"
+	revised, err := store.Revise(ctx, req.ID, author, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.submit(ctx, req.ID, author, validatedID); !errors.Is(err, errRevisionChanged) {
+		t.Fatalf("stale validation should keep revision %d out of review, got %v", revised.RevisionID, err)
+	}
+	var validation *sqlValidationError
+	if err := validateSQL(ctx, db, "sql_up", definition.SQLUp); !errors.As(err, &validation) || validation.SQLState != "42601" {
+		t.Fatalf("expected PostgreSQL syntax diagnostic, got %v", err)
+	}
+
+	definition.SQLUp = "SELECT 2"
+	revised, err = store.Revise(ctx, req.ID, author, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSQL(ctx, db, "sql_up", definition.SQLUp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.submit(ctx, req.ID, author, revised.RevisionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Approve(ctx, req.ID, author, true); err != nil {
+		t.Fatal(err)
+	}
+	approvedID := revised.RevisionID
+	definition.SQLUp = "SELECT 3"
+	revised, err = store.Revise(ctx, req.ID, author, definition)
+	if err != nil || revised.Status != Draft || revised.RevisionID == approvedID {
+		t.Fatalf("approved draft should return to Draft with a new revision: %+v, %v", revised, err)
+	}
+	current, err := store.Approvals(ctx, req.ID)
+	if err != nil || len(current) != 0 {
+		t.Fatalf("current approvals should be cleared: %+v, %v", current, err)
+	}
+	decisions, err := store.ApprovalHistory(ctx, req.ID)
+	if err != nil || len(decisions) != 1 || decisions[0].RevisionID != approvedID {
+		t.Fatalf("decision on the prior revision should remain in history: %+v, %v", decisions, err)
+	}
+	if err := validateSQL(ctx, db, "sql_up", definition.SQLUp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.submit(ctx, req.ID, author, revised.RevisionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.approve(ctx, req.ID, author, true, approvedID); !errors.Is(err, errRevisionChanged) {
+		t.Fatalf("stale reviewer must not approve the new revision, got %v", err)
+	}
+	if _, err := store.approve(ctx, req.ID, author, true, revised.RevisionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.queueRevision(ctx, req.ID, author, approvedID); !errors.Is(err, errRevisionChanged) {
+		t.Fatalf("stale revision must not queue, got %v", err)
+	}
+	if _, err := store.queueRevision(ctx, req.ID, author, revised.RevisionID); err != nil {
+		t.Fatalf("current revision should still be approved and queueable: %v", err)
+	}
+}
+
+func TestActionUsesSelectedExecutionAndForwardsInOrder(t *testing.T) {
+	db := setupLifecycleDB(t)
+	ctx := context.Background()
+	store := NewStore(db)
+	author := lifecycleUser(t, db, "linear-author")
+	dbID := lifecycleDatabase(t, db)
+	lifecycleGroup(t, db, "linear-group", dbID, 2, &author, author)
+
+	finish := func(req Request) int64 {
+		t.Helper()
+		if _, err := store.Submit(ctx, req.ID, author); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Approve(ctx, req.ID, author, true); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Queue(ctx, req.ID, author); err != nil {
+			t.Fatal(err)
+		}
+		if claimed, err := store.Claim(ctx, req.ID); err != nil || !claimed {
+			t.Fatalf("claim: %v, %v", claimed, err)
+		}
+		id, err := store.RecordAttempt(ctx, req.ID, author, Success, 1, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	action := func(req Request, action string, executionID int64) Request {
+		t.Helper()
+		result, err := store.createAction(ctx, author, dbID, req.MigrationID, action, executionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.TargetExecutionID == nil || *result.TargetExecutionID != executionID {
+			t.Fatalf("action must reference the selected execution %d: %+v", executionID, result)
+		}
+		return result
+	}
+	b := lifecycleRequest(t, store, ctx, author, dbID, "B")
+	bUp := finish(b)
+	c := lifecycleRequest(t, store, ctx, author, dbID, "C")
+	cUp := finish(c)
+	cRollback := finish(action(c, Rollback, cUp))
+	bRollback := finish(action(b, Rollback, bUp))
+	if _, err := store.createAction(ctx, author, dbID, c.MigrationID, Forward, cRollback); !errors.Is(err, ErrConflict) {
+		t.Fatalf("forward C before B must be rejected, got %v", err)
+	}
+
+	bForward := finish(action(b, Forward, bRollback))
+	if _, err := store.createAction(ctx, author, dbID, b.MigrationID, Rollback, bUp); !errors.Is(err, ErrConflict) {
+		t.Fatalf("old Up must not silently select Forward %d, got %v", bForward, err)
+	}
+	history, err := store.ListHistory(ctx, dbID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := make(map[int64]string)
+	for _, row := range history {
+		if row.AvailableAction != "" {
+			actions[row.ID] = row.AvailableAction
+		}
+	}
+	if len(actions) != 2 || actions[bForward] != Rollback || actions[cRollback] != Forward {
+		t.Fatalf("unexpected history actions: %v", actions)
+	}
+	finish(action(c, Forward, cRollback))
+}

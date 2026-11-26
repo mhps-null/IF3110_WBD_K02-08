@@ -88,6 +88,7 @@ export interface JobDetail {
 }
 
 export interface ExecuteOptions {
+  revision_id: number;
   mode?: 'normal' | 'batch';
   batch_table?: string;
   batch_column?: string;

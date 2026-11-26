@@ -6,15 +6,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
 
 var (
-	ErrInvalid   = errors.New("invalid migration request")
-	ErrConflict  = errors.New("migration state conflict")
-	ErrForbidden = errors.New("permission denied")
-	ErrNotFound  = errors.New("record not found")
+	ErrInvalid         = errors.New("invalid migration request")
+	ErrConflict        = errors.New("migration state conflict")
+	ErrForbidden       = errors.New("permission denied")
+	ErrNotFound        = errors.New("record not found")
+	errRevisionChanged = fmt.Errorf("%w: revision changed", ErrConflict)
 )
 
 const (
@@ -66,19 +68,20 @@ type ApprovalDecision struct {
 	RevisionID int64     `json:"revision_id"`
 }
 type Execution struct {
-	ID           int64   `json:"execution_id"`
-	AttemptID    int64   `json:"attempt_id"`
-	RequestID    int64   `json:"request_id"`
-	MigrationID  int64   `json:"migration_id"`
-	RevisionID   int64   `json:"revision_id"`
-	ActorID      int64   `json:"user_id"`
-	Action       string  `json:"action"`
-	Status       string  `json:"status"`
-	SQLSnapshot  string  `json:"sql_snapshot"`
-	RollbackOf   *int64  `json:"rollback_of_execution_id"`
-	Attempt      int     `json:"attempt"`
-	ExecutedAt   string  `json:"executed_at"`
-	ErrorMessage *string `json:"error_message,omitempty"`
+	ID              int64   `json:"execution_id"`
+	AttemptID       int64   `json:"attempt_id"`
+	RequestID       int64   `json:"request_id"`
+	MigrationID     int64   `json:"migration_id"`
+	RevisionID      int64   `json:"revision_id"`
+	ActorID         int64   `json:"user_id"`
+	Action          string  `json:"action"`
+	Status          string  `json:"status"`
+	SQLSnapshot     string  `json:"sql_snapshot"`
+	RollbackOf      *int64  `json:"rollback_of_execution_id"`
+	Attempt         int     `json:"attempt"`
+	ExecutedAt      string  `json:"executed_at"`
+	ErrorMessage    *string `json:"error_message,omitempty"`
+	AvailableAction string  `json:"available_action,omitempty"`
 }
 
 func ValidateDefinition(d DefinitionInput) error {
