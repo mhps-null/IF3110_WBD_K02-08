@@ -282,3 +282,34 @@ TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
 ├── migrations_meta/          # SQL migration additive untuk database metadata platform (001 s.d. 006)
 └── web/                      # Template & asset legacy M1 (dipertahankan untuk kompatibilitas unit test M1)
 ```
+
+---
+
+## 9. [BONUS] Observability Stack & Stress Testing (`k6`)
+
+### A. Menjalankan Observability Stack (OTel Collector, Prometheus, Grafana)
+
+```bash
+docker compose -f docker/docker-compose.yml up -d otel-collector prometheus grafana
+```
+
+- **Endpoint Prometheus Metrics**: `GET http://localhost:8080/metrics` (API) dan `GET http://localhost:9091/metrics` (Worker).
+- **Prometheus UI**: `http://localhost:9090`
+- **Grafana Dashboard**: `http://localhost:3000` (login: `admin` / `admin`) — otomatis memuat dashboard **"IF3110 M2 — Migration Queue & DB Connection Pool"** dari [`docker/observability/grafana/dashboards/if3110-dbplatform.json`](docker/observability/grafana/dashboards/if3110-dbplatform.json).
+- **OTLP Trace Export**: Set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` saat menjalankan server/worker untuk meneruskan span secara otomatis ke OpenTelemetry Collector.
+
+### B. Stress Testing dengan `k6` ([`docker/k6/stress_test.js`](docker/k6/stress_test.js))
+
+Script `k6` menguji akses API (`GET /api/databases`, `GET /api/databases/{id}/schema`, `GET /api/audit-logs`) dan pengiriman job migration yang sudah **Approved** secara bersamaan pada database yang sama (`DB_ID_A`) maupun database berbeda (`DB_ID_B`), lalu memantau status job (`GET /api/v2/jobs/{id}`) hingga selesai. Respons `202 Accepted` tidak dihitung sebagai keberhasilan eksekusi migration.
+
+- **Threshold**: `p(95) < 500 ms`, `p(50) < 150 ms`, dan `error_rate < 5%`.
+- **Metrik Kustom**: `api_response_time_ms` (`p50`, `p95`), `api_error_rate`, `job_queue_wait_ms`, `job_completion_duration_ms`, dan `jobs_completed_total`.
+
+#### Ringkasan Skenario & Analisis per Tingkat Beban
+
+| Tingkat Beban | Durasi | Target VU | Perilaku & Analisis Sistem |
+|---|---:|---:|---|
+| **1. Baseline Normal** | `20s` | `10 VUs` | Latensi API (`p50`/`p95`) rendah dan stabil; koneksi pool (`MaxOpenConns=10`) tidak mengalami antrean (`pool_wait = 0`), job langsung diklaim worker dengan waktu tunggu queue minimal. |
+| **2. Elevated Load** | `30s` | `30 VUs` | Throughput request meningkat; job pada database berbeda (`DB_ID_A` vs `DB_ID_B`) dieksekusi paralel oleh worker, sedangkan job pada database yang sama mengantre secara aman di belakang advisory lock per-database. |
+| **3. Peak Stress** | `30s` | `60 VUs` | Waktu tunggu queue (`job_queue_wait_ms`) dan connection pool wait naik karena batas `MaxOpenConns(10)` melindungi PostgreSQL target dari *connection exhaustion*, namun API tetap merespons cepat karena eksekusi SQL berjalan asynchronous di worker. |
+| **4. Recovery** | `20s` | `10 VUs` | Beban diturunkan kembali ke normal; backlog job di antrean dikuras habis oleh worker, koneksi *in-use* turun kembali ke *idle*, dan `p95` response time API pulih ke level baseline tanpa kebocoran goroutine atau *deadlock*. |

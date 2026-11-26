@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# SCRIPT PENDAFTARAN KONEKSI DATABASE DOCKER KE PLATFORM ADMIN (MILESTONE 2 JSON API)
-# ==============================================================================
+# Register Docker test database connections via the Admin JSON API.
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
@@ -89,7 +87,4 @@ EOF
 fi
 
 echo ""
-echo "=========================================================================="
-echo " SELURUH DATABASE TESTING TELAH TERHUBUNG DAN SIAP DIGUNAKAN DI SPA!"
-echo " Buka browser di http://localhost:8080/databases untuk mulai eksplorasi."
-echo "=========================================================================="
+echo "Done. Buka ${BASE_URL}/databases pada browsermu."

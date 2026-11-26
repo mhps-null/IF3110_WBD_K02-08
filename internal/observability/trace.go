@@ -143,6 +143,9 @@ func (s *Span) Context() SpanContext { return s.ctx }
 func (s *Span) SetAttr(key string, val any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.finished {
+		return
+	}
 	s.attrs[key] = RedactValue(key, val)
 }
 
@@ -152,6 +155,9 @@ func (s *Span) RecordError(err error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.finished {
+		return
+	}
 	s.status = "error"
 	s.errMsg = RedactString(err.Error())
 }
