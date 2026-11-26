@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -155,7 +157,6 @@ func TestEndToEndTracePropagationAndSpanExport(t *testing.T) {
 	apiTracer := NewTracer("", exporter)
 	workerTracer := NewTracer("worker", exporter)
 
-	// Nil safety checks
 	InjectTraceContext(context.Background(), nil)
 	_ = ExtractTraceContext(context.Background(), nil)
 	_, _ = SpanContextFrom(nil)
@@ -163,7 +164,6 @@ func TestEndToEndTracePropagationAndSpanExport(t *testing.T) {
 		t.Fatal("expected empty correlation ID from nil ctx")
 	}
 
-	// 1. API span -> Queue carrier
 	baseCtx := WithCorrelationID(context.Background(), "corr-e2e-100")
 	apiCtx, apiSpan := apiTracer.StartSpan(baseCtx, "api.submit_migration",
 		slog.Int64("migration_id", 42),
@@ -175,9 +175,10 @@ func TestEndToEndTracePropagationAndSpanExport(t *testing.T) {
 	carrier := make(map[string]string)
 	InjectTraceContext(apiCtx, carrier)
 	apiSpan.End()
-	apiSpan.End() // Idempotent second call must not export duplicate span
+	apiSpan.End()
+	apiSpan.SetAttr("after_end", "ignored")
+	apiSpan.RecordError(errors.New("ignored_after_end"))
 
-	// 2. Queue -> Worker -> Lock -> Batch/Query
 	workerInCtx := ExtractTraceContext(context.Background(), carrier)
 	workerCtx, workerSpan := workerTracer.StartSpan(workerInCtx, "worker.run_migration")
 	lockCtx, lockSpan := workerTracer.StartSpan(workerCtx, "worker.acquire_db_lock")
@@ -197,7 +198,6 @@ func TestEndToEndTracePropagationAndSpanExport(t *testing.T) {
 	batchSpan.End()
 	workerSpan.End()
 
-	// Verify 4 spans exported: api, lock, batch, worker
 	spanLines := strings.Split(strings.TrimSpace(spanBuf.String()), "\n")
 	if len(spanLines) != 4 {
 		t.Fatalf("expected 4 exported spans, got %d: %s", len(spanLines), spanBuf.String())
@@ -216,7 +216,6 @@ func TestEndToEndTracePropagationAndSpanExport(t *testing.T) {
 		t.Fatalf("worker span lineage mismatch: %+v vs api %+v", workerSpanRec, apiSC)
 	}
 
-	// Fallback correlation ID from trace_id when carrier only has traceparent
 	onlyTP := map[string]string{TraceParentHeader: apiSC.TraceParent()}
 	extracted := ExtractTraceContext(context.Background(), onlyTP)
 	if CorrelationIDFrom(extracted) != apiSC.TraceID {
@@ -231,7 +230,6 @@ func TestSQLLifecycleAndMigrationAttemptLogging(t *testing.T) {
 		t.Fatal("expected underlying slog.Logger to be non-nil")
 	}
 
-	// Nil logger safety
 	var nilLogger *Logger
 	nilLogger.LogActivity(context.Background(), "noop", "sys", "db", "ok")
 	nilLogger.LogSQLStart(context.Background(), SQLEvent{})
@@ -239,7 +237,6 @@ func TestSQLLifecycleAndMigrationAttemptLogging(t *testing.T) {
 	ctx, span := NewTracer("worker", nil).StartSpan(context.Background(), "migration.attempt_run")
 	sqlErr := fakeSQLError{msg: "deadlock detected password=secret123", state: "40P01"}
 
-	// 1. Log failed migration attempt with SQL copy & extracted SQLSTATE
 	logger.LogMigrationAttempt(ctx, SQLEvent{
 		Database:    "ecommerce_pg",
 		Query:       "ALTER TABLE orders ADD COLUMN notes TEXT",
@@ -251,7 +248,6 @@ func TestSQLLifecycleAndMigrationAttemptLogging(t *testing.T) {
 		JobID:       "job-12",
 		Attempt:     2,
 	})
-	// 2. Log rollback with explicit SQLState
 	logger.LogSQLRollback(ctx, SQLEvent{
 		Database:    "ecommerce_pg",
 		MigrationID: 12,
@@ -314,7 +310,7 @@ func TestHTTPMiddlewareStatusCategories(t *testing.T) {
 					return
 				}
 				w.WriteHeader(tc.statusCode)
-				w.WriteHeader(http.StatusTeapot) // Second WriteHeader should be ignored
+				w.WriteHeader(http.StatusTeapot)
 			}))
 
 			req := httptest.NewRequest(http.MethodGet, "/api/databases", nil)
@@ -350,7 +346,7 @@ func TestHTTPMiddlewareStatusCategories(t *testing.T) {
 	}
 }
 
-func TestMetricsRecorderConcurrencyAndNoop(t *testing.T) {
+func TestMetricsRecorderPrometheusAndConcurrency(t *testing.T) {
 	var noop NoopMetrics
 	noop.SetJobStatusCount(JobStatusWaiting, 1)
 	noop.IncJobStatus(JobStatusRunning, 1)
@@ -382,17 +378,138 @@ func TestMetricsRecorderConcurrencyAndNoop(t *testing.T) {
 	}
 	wg.Wait()
 	m.SetJobStatusCount(JobStatusWaiting, 5)
+	m.SetJobStatusCount("unbounded_user_id_999", 1) // Must be clamped to "other"
+	m.SetPoolSnapshot("pg_replica", 2, 5, 3, 15*time.Millisecond)
 
-	if m.JobCounts[JobStatusRunning] != 10 || m.JobCounts[JobStatusWaiting] != 5 {
-		t.Fatalf("unexpected job counts: %+v", m.JobCounts)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /metrics, got %d", rec.Code)
 	}
-	if m.Retries != 10 || m.BatchesProcessed != 20 || m.RowsProcessed != 1000 {
-		t.Fatalf("unexpected counters: retries=%d batches=%d rows=%d", m.Retries, m.BatchesProcessed, m.RowsProcessed)
+	body := rec.Body.String()
+	for _, want := range []string{
+		`dbplatform_migration_jobs{status="waiting"} 5`,
+		`dbplatform_migration_jobs{status="running"} 10`,
+		`dbplatform_migration_jobs{status="other"} 1`,
+		`dbplatform_migration_job_retries_total 10`,
+		`dbplatform_migration_batches_processed_total 20`,
+		`dbplatform_migration_rows_processed_total 1000`,
+		`dbplatform_db_pool_connections{pool="pg_target",state="active"} 4`,
+		`dbplatform_db_pool_connections{pool="pg_target",state="idle"} 2`,
+		`dbplatform_db_pool_wait_total{pool="pg_target"} 10`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected Prometheus metric %q in output:\n%s", want, body)
+		}
 	}
-	if m.QueueWaitCount != 10 || m.LockWaitCount != 10 || m.MigrationDurCount[JobStatusSuccess] != 10 {
-		t.Fatalf("unexpected observation counts")
+	if strings.Contains(body, "unbounded_user_id_999") {
+		t.Fatalf("unbounded label leaked into Prometheus output:\n%s", body)
 	}
-	if m.Pools["pg_target"].Active != 4 || m.Pools["pg_target"].WaitCount != 10 {
-		t.Fatalf("unexpected pool metrics: %+v", m.Pools["pg_target"])
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestOTLPAndMultiSpanExporter(t *testing.T) {
+	var nilMulti *MultiSpanExporter
+	nilMulti.ExportSpan(SpanRecord{})
+	var nilOTLP *OTLPSpanExporter
+	nilOTLP.ExportSpan(SpanRecord{})
+	NewOTLPSpanExporter("").ExportSpan(SpanRecord{})
+
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	if _, ok := NewDefaultSpanExporter(io.Discard).(*ConsoleSpanExporter); !ok {
+		t.Fatal("expected ConsoleSpanExporter when OTEL_EXPORTER_OTLP_ENDPOINT is empty")
+	}
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318/v1/traces")
+	if _, ok := NewDefaultSpanExporter(io.Discard).(*MultiSpanExporter); !ok {
+		t.Fatal("expected MultiSpanExporter when OTEL_EXPORTER_OTLP_ENDPOINT is set")
+	}
+
+	var received []byte
+	var gotPath string
+	otlpExp := NewOTLPSpanExporter("http://otel-collector:4318")
+	otlpExp.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotPath = r.URL.Path
+		received, _ = io.ReadAll(r.Body)
+		rec := httptest.NewRecorder()
+		rec.WriteHeader(http.StatusOK)
+		return rec.Result(), nil
+	})
+
+	var consoleBuf bytes.Buffer
+	multi := NewMultiSpanExporter(nil, NewConsoleSpanExporter(&consoleBuf), otlpExp)
+	tracer := NewTracer("api", multi)
+
+	parentCtx, parentSpan := tracer.StartSpan(context.Background(), "api.parent_ok")
+	parentSpan.End()
+
+	_, childSpan := tracer.StartSpan(parentCtx, "api.otlp_test", slog.String("db", "ecommerce_pg"))
+	childSpan.RecordError(errors.New("timeout"))
+	childSpan.End()
+
+	if consoleBuf.Len() == 0 {
+		t.Fatal("expected console exporter to receive span")
+	}
+	if gotPath != "/v1/traces" {
+		t.Fatalf("expected OTLP path /v1/traces, got %s", gotPath)
+	}
+	if len(received) == 0 || !strings.Contains(string(received), `"name":"api.otlp_test"`) || !strings.Contains(string(received), `"parentSpanId"`) {
+		t.Fatalf("expected OTLP server to receive child span payload, got: %s", string(received))
+	}
+
+	// Transport error must not panic
+	otlpExp.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("collector unreachable")
+	})
+	otlpExp.ExportSpan(SpanRecord{Name: "unreachable_test"})
+}
+
+func TestObservabilityBonusArtifactsValidation(t *testing.T) {
+	dashBytes, err := os.ReadFile("../../docker/observability/grafana/dashboards/if3110-dbplatform.json")
+	if err != nil {
+		t.Fatalf("read Grafana dashboard JSON: %v", err)
+	}
+	var dash map[string]any
+	if err := json.Unmarshal(dashBytes, &dash); err != nil {
+		t.Fatalf("invalid Grafana dashboard JSON: %v", err)
+	}
+	dashStr := string(dashBytes)
+	for _, metric := range []string{
+		"dbplatform_migration_jobs",
+		"dbplatform_migration_job_retries_total",
+		"dbplatform_migration_batches_processed_total",
+		"dbplatform_migration_rows_processed_total",
+		"dbplatform_migration_queue_wait_seconds_sum",
+		"dbplatform_migration_lock_wait_seconds_sum",
+		"dbplatform_migration_duration_seconds_sum",
+		"dbplatform_db_pool_connections",
+		"dbplatform_db_pool_wait_seconds_total",
+	} {
+		if !strings.Contains(dashStr, metric) {
+			t.Errorf("Grafana dashboard missing required metric %q", metric)
+		}
+	}
+
+	k6Bytes, err := os.ReadFile("../../docker/k6/stress_test.js")
+	if err != nil {
+		t.Fatalf("read k6 stress test script: %v", err)
+	}
+	k6Str := string(k6Bytes)
+	for _, required := range []string{
+		"stages:",
+		"thresholds:",
+		"p(95)<500",
+		"api_error_rate",
+		"job_queue_wait_ms",
+		"job_completion_duration_ms",
+		"/api/v2/jobs/",
+	} {
+		if !strings.Contains(k6Str, required) {
+			t.Errorf("k6 stress test script missing required element %q", required)
+		}
 	}
 }

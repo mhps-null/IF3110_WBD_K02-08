@@ -209,7 +209,7 @@ func TestAuditHandlerSuccessFailureAndAccessDenied(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
-	// Access Denied: non-admin user
+	// Access Denied, non-admin user
 	reqForbidden := httptest.NewRequest(http.MethodGet, "/api/audit-logs", nil)
 	reqForbidden = reqForbidden.WithContext(contract.WithPrincipal(reqForbidden.Context(), contract.Principal{
 		UserID: 2, Username: "alice", IsPlatformAdmin: false,
@@ -220,7 +220,7 @@ func TestAuditHandlerSuccessFailureAndAccessDenied(t *testing.T) {
 		t.Fatalf("expected 403 Forbidden for non-admin, got %d", recForbidden.Code)
 	}
 
-	// Success: platform admin with filter
+	// Success, platform admin with filter
 	reqOK := httptest.NewRequest(http.MethodGet, "/api/audit-logs?actor=alice&status=failed&page=1&page_size=10", nil)
 	reqOK = reqOK.WithContext(contract.WithPrincipal(reqOK.Context(), contract.Principal{
 		UserID: 1, Username: "admin", IsPlatformAdmin: true,

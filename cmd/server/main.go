@@ -33,7 +33,7 @@ import (
 func main() {
 	obsLogger := observability.NewLogger(os.Stdout, slog.LevelInfo)
 	logger := obsLogger.Slog()
-	tracer := observability.NewTracer("api", observability.NewConsoleSpanExporter(os.Stderr))
+	tracer := observability.NewTracer("api", observability.NewDefaultSpanExporter(os.Stderr))
 	metrics := observability.NewInMemoryMetrics()
 
 	cfg, err := config.Load()
@@ -145,6 +145,12 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
+	})
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		for _, ps := range poolManager.PoolStats() {
+			metrics.SetPoolSnapshot(ps.DBName, ps.InUse, ps.Idle, ps.WaitCount, ps.WaitDuration)
+		}
+		metrics.Handler().ServeHTTP(w, r)
 	})
 
 	// Serve built React SPA assets and client-side routes; unmatched /api/* returns JSON 404.
