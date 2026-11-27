@@ -89,7 +89,7 @@ func (s *Store) Revalidate(ctx context.Context, requestID int64) error {
 	if outstanding > 0 {
 		return ErrConflict
 	}
-	if err = eligibleTx(ctx, tx, q); err != nil {
+	if err = eligibleModeTx(ctx, tx, q, eligibilityClaim); err != nil {
 		return err
 	}
 	return tx.Commit()

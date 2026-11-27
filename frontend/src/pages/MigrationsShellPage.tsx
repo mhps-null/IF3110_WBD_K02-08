@@ -437,7 +437,7 @@ export function MigrationsShellPage() {
                 </div>
 
                 <p>
-                  Migration #{e.migration_id}, revisi #{e.revision_id}, attempt {e.attempt}{' '}
+                  Migration #{e.migration_id}, revisi #{e.revision_id}, user #{e.user_id}, attempt {e.attempt}{' '}
                   {e.rollback_of_execution_id
                     ? `· rollback/forward reference #${e.rollback_of_execution_id}`
                     : ''}

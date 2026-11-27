@@ -278,6 +278,7 @@ func (s *Store) ClaimNext(ctx context.Context, workerID string, lease time.Durat
 			WHERE j.status IN ('queued','retrying','uncertain') AND j.next_run_at <= now()
 			  AND NOT EXISTS (SELECT 1 FROM migration_jobs o WHERE o.db_id=j.db_id AND o.id<>j.id
 			                  AND o.status IN ('running','compensating') AND o.lease_expires_at > now())
+			  AND NOT EXISTS (SELECT 1 FROM migration_db_holds h WHERE h.db_id=j.db_id AND h.job_id<>j.id)
 			ORDER BY j.next_run_at, j.id
 			FOR UPDATE SKIP LOCKED LIMIT 1)
 		UPDATE migration_jobs j SET

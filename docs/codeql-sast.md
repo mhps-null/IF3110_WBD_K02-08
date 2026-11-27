@@ -45,5 +45,10 @@ Berkas workflow: [`.github/workflows/codeql.yml`](../.github/workflows/codeql.ym
 * **Hasil Rescan (`is:open branch:feat/m2-p1`):** **`0 Open` · `4 Closed`** (seluruh 2 alert High dan 2 alert Medium terverifikasi selesai oleh GitHub CodeQL).
 * **Verifikasi Regresi Lokal:** `go vet ./...`, `go build ./...`, `go test -race` (`postgres`, `observability`, `viewer`, `audit`), dan `TestPostgresIntrospectIntegration` seluruhnya lulus.
 
+### Catatan Penguatan Pasca-Merge Tim (Finalisasi Milestone 2)
+Setelah penggabungan seluruh modul anggota tim (`internal/lifecycle`, `internal/jobs`, `cmd/worker`, `frontend/`), dilakukan audit aliran data tambahan yang sejalan dengan aturan CodeQL `+security-extended`:
+* **Hardening `internal/jobs/ledger.go` (`ValidateCursor`)**: Sebelumnya `CursorPlan` membentuk string identifier dari input `batch_table` dan `batch_column` hasil sanitasi regex + `pgx.Identifier`. Agar sejalan 100% dengan pola remediasi Alert #1 & #2 (`3b0bc21`), query katalog pada `ValidateCursor` diperkuat untuk membaca langsung `n.nspname`, `c.relname`, dan `a.attname` dari `pg_catalog` (mengecualikan `pg_catalog` dan `information_schema`), sehingga `scopeQuery()` dan `nextBoundQuery()` murni dibangun dari identifier katalog sistem PostgreSQL tanpa aliran taint dari parameter HTTP.
+* **Sanitasi Log**: Seluruh path HTTP dan string eksternal pada handler baru (`internal/jobs/http.go`, `cmd/worker/main.go`, `internal/observability/otlp.go`) telah menggunakan `observability.SanitizeLogString` dan `RedactString`.
+
 ### Catatan Keterbatasan SAST
 Cakupan analisis mencakup seluruh kode Go (`cmd/`, `internal/`) dan frontend TypeScript/React (`frontend/src/`). **Hasil scan CodeQL yang bersih (`0 Open`) tidak menjamin aplikasi pasti bebas dari kerentanan keamanan**; SAST tetap harus dilengkapi dengan enforcement otorisasi backend, proteksi CSRF/session cookie, unit/integration test (`go test -race`), dan peninjauan kode manual.

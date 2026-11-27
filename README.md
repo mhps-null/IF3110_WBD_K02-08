@@ -23,7 +23,14 @@ Platform manajemen database PostgreSQL terintegrasi berbasis **Go JSON API** dan
   - Pencatatan setiap aktivitas penting dan query SQL (termasuk pembacaan skema & data read-only pada viewer: `sql.start`, `sql.result`, `sql.commit`, `sql.rollback`, `migration.attempt`).
   - Propagasi W3C `traceparent` & `X-Correlation-ID` (`InjectTraceContext` / `ExtractTraceContext`) beserta korelasi `trace_id` dan `span_id` pada log dan audit event.
   - Penyimpanan dan pencarian jejak audit platform (`migrations_meta/003_audit_logs.sql`, `GET /api/audit-logs`) serta seed dataset pengujian batch berukuran besar (**500.000 baris** pada `docker/postgres-init/04-init-large-batch-dataset.sql`).
-- **[BONUS M2] Security — SAST dengan GitHub CodeQL (`.github/workflows/codeql.yml`, `docs/codeql-sast.md`)**: Analisis statis otomatis untuk bahasa **Go** dan **JavaScript/TypeScript** (`+security-extended`). Scan awal (`1fb9fad`) mendeteksi 4 temuan (`2 High go/sql-injection`, `2 Medium go/log-injection`), seluruhnya telah diperbaiki pada commit `3b0bc21` dan terverifikasi **`0 Open · 4 Closed`** pada scan ulang.
+- **Migration Lifecycle, Multi-Group Leader Approval, & Immutable History (`internal/lifecycle`)**:
+  - Siklus hidup lengkap `Draft → Pending Review → Approved → Pending (Queue) → Running → Success / Failed` dengan validasi sintaks SQL via PostgreSQL protocol `Parse` (tanpa mengeksekusi query), revisi SQL immutable, serta pencatatan **seluruh attempt eksekusi (baik `success` maupun `failed`/ter-rollback)** secara *append-only* beserta `execution_id`, `migration_id`, revisi, pengguna, waktu, status, dan salinan SQL aktual.
+  - Approval wajib dari **seluruh** Group Leader yang grupnya memiliki akses ke database (`View Only` maupun `View + Edit`); 1 user yang memimpin beberapa grup menyetujui seluruh grupnya dalam satu klik; grup tanpa leader menjaga request tetap `Pending Review` (bukan ditolak); dukungan **Rollback** linear (merujuk `rollback_of_execution_id`), **Forward** berurutan, dan filter **Hide rollback** berdasarkan pasangan `execution_id`.
+- **Asynchronous Migration Engine, Batch Cursor, & Crash Recovery (`internal/jobs`, `cmd/worker`)**:
+  - Durable PostgreSQL-backed job queue (`migrations_meta/007_job_queue_worker.sql`) dengan worker terpisah (`cmd/worker`), *worker lease* + *heartbeat*, *session-scoped* PostgreSQL advisory lock lintas worker (1 migration aktif per DB termasuk di sela commit batch; DB berbeda dieksekusi paralel), serta *target ledger* (`_dbplatform.migration_ledger`) yang di-commit dalam transaksi yang sama dengan perubahan data/skema untuk *idempotency*, *resume* dari checkpoint tanpa pengulangan batch, kompensasi per batch urutan terbalik (`partially_reverted` → `reverted`), retry terbatas dengan *exponential backoff*, dan penahanan (*hold*) database saat hasil commit `uncertain` atau `partial`.
+- **[BONUS M2] Observability Terpusat (`docker/observability`, `internal/observability`, `internal/jobs/metrics.go`)**: Pengumpulan terpusat **logs** (ke **Grafana Loki**), **distributed traces** (ke **Jaeger** lintas `if3110-api` → queue → `if3110-worker`), dan **metrics** berformat Prometheus (`:8080/metrics`, `:9091/metrics`, serta OTLP `/v1/metrics` → **Prometheus**) melalui **OpenTelemetry Collector**, lengkap dengan provisioning **Grafana Dashboard** 7 panel & korelasi dua arah `trace_id` ↔ log tanpa label berkardinalitas tinggi.
+- **[BONUS M2] Stress Testing dengan `k6` (`docker/k6/stress_test.js`)**: Pengujian beban bertahap (`10 → 30 → 60 → 10 → 0 VUs`) untuk akses API konkuren dan pengiriman **90 migration job Approved** pada database yang sama maupun berbeda hingga status terminal `success` (**32.835 request**, `error_rate = 0,00%`, API `p50 = 7,51 ms`, `p95 = 40,58 ms`).
+- **[BONUS M2] Security — SAST dengan GitHub CodeQL (`.github/workflows/codeql.yml`, `docs/codeql-sast.md`)**: Analisis statis otomatis untuk bahasa **Go** dan **JavaScript/TypeScript** (`+security-extended`). Scan awal (`1fb9fad`) mendeteksi 4 temuan (`2 High go/sql-injection`, `2 Medium go/log-injection`), seluruhnya telah diperbaiki pada commit `3b0bc21` dan terverifikasi **`0 Open · 4 Closed`** pada scan ulang, ditambah penguatan resolusi katalog `pg_catalog` pada kursor batch (`internal/jobs/ledger.go`).
 - **[Fondasi & Bonus M1 yang Dipertahankan]**: Transactional migration engine dengan PostgreSQL advisory lock, dukungan driver MySQL/MariaDB, Schema Diff & DDL generation (`internal/schemadiff`), serta Query Execution Plan Analysis (`EXPLAIN` / `EXPLAIN ANALYZE` di `internal/explain`).
 
 ---
@@ -177,6 +184,17 @@ Seluruh endpoint mutasi (`POST`, `PUT`, `PATCH`, `DELETE`) mewajibkan cookie CSR
 | `POST` | `/api/admin/connections/test` | Platform Admin | Uji konektivitas langsung ke database target |
 | `GET` | `/api/admin/connections/pool-stats` | Platform Admin | Statistik live connection pool (`OpenConns`, `InUse`, `Idle`, `WaitCount`, `WaitDuration`) |
 | `GET` | `/api/audit-logs` | Platform Admin | Pencarian & paginasi jejak audit platform (`actor`, `event`, `database`, `status`) |
+| `POST` | `/api/v2/databases/{db}/migrations` | View + Edit | Membuat draft migration baru (SQL Up + SQL Down atau alasan irreversible) |
+| `GET` | `/api/v2/databases/{db}/requests` | View Only | Daftar request migration beserta status pada database target |
+| `GET` | `/api/v2/databases/{db}/requests/{id}` | View Only | Detail request, definisi SQL immutable, status approval tiap group, & riwayat keputusan |
+| `PATCH` | `/api/v2/databases/{db}/requests/{id}` | View + Edit | Membuat revisi baru sebelum pernah ada attempt eksekusi (mereset approval aktif) |
+| `POST` | `/api/v2/databases/{db}/requests/{id}/validate` | View + Edit | Validasi sintaks SQL Up/Down via PostgreSQL protocol `Parse` tanpa eksekusi |
+| `POST` | `/api/v2/databases/{db}/requests/{id}/submit` | View + Edit | Validasi sintaks & pengajuan request ke `pending_review` untuk seluruh group berakses |
+| `POST` | `/api/v2/databases/{db}/requests/{id}/refresh-review` | View + Edit | Memperbarui snapshot group/leader tanpa mengubah revisi SQL |
+| `POST` | `/api/v2/databases/{db}/requests/{id}/{approve\|reject}` | Group Leader | Keputusan approve/reject untuk seluruh group yang dipimpin aktor pada revisi terkait |
+| `POST` | `/api/v2/databases/{db}/migrations/{migration}/actions` | View + Edit | Membuat draft eksekusi `rollback` atau `forward` linear berdasarkan `execution_id` |
+| `GET` | `/api/v2/databases/{db}/history?hide_rollback=` | View Only | Riwayat semua attempt (`success` & `failed`) beserta filter `Hide rollback` per pasangan `execution_id` |
+| `GET` | `/api/v2/review-inbox` | Login (Leader) | Daftar request `pending_review` yang menunggu keputusan Group Leader aktif |
 | `POST` | `/api/v2/databases/{db}/requests/{id}/execute` | View + Edit | Publish job (mode `normal`/`batch`) untuk request **Approved**; **202** + `job_id` tanpa menunggu SQL |
 | `GET` | `/api/v2/jobs?db_id=&status=` | View Only | Daftar job pada database yang dapat diakses user |
 | `GET` | `/api/v2/jobs/{id}` | View Only | Status/progress job, checkpoint batch, timeline worker, dan aksi yang diizinkan |
@@ -249,6 +267,7 @@ TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
 
 - **Arsitektur SPA, JSON API, & Group Leader (Orang 1):** [`docs/m2-p1-spa-and-auth.md`](docs/m2-p1-spa-and-auth.md)
 - **Observability, Structured Logging/Tracing, Audit Log, & Dataset 500k Row (Orang 2):** [`docs/m2-observability-and-dataset.md`](docs/m2-observability-and-dataset.md)
+- **Migration Lifecycle, Multi-Group Approval, Rollback/Forward, & History (Orang 3):** [`docs/m2-person3.md`](docs/m2-person3.md)
 - **Async Engine: Queue, Worker, Lock, Batch, Retry, Recovery, & Job Monitoring (Orang 4):** [`docs/m2-person4.md`](docs/m2-person4.md)
 - **[BONUS] SAST dengan GitHub CodeQL (Temuan, Perbaikan, & Rescan):** [`docs/codeql-sast.md`](docs/codeql-sast.md)
 - **Dokumen Desain Fondasi M1:** [`docs/auth-session.md`](docs/auth-session.md), [`docs/access-control.md`](docs/access-control.md), [`docs/db-management.md`](docs/db-management.md), [`docs/migration.md`](docs/migration.md), [`docs/schema-diff.md`](docs/schema-diff.md), [`docs/p1-integration-notes.md`](docs/p1-integration-notes.md)
@@ -263,15 +282,16 @@ TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
 │       └── codeql.yml        # Workflow SAST GitHub CodeQL (Go & JavaScript/TypeScript)
 ├── cmd/
 │   ├── seed/                 # Seeding Platform Admin awal
-│   └── server/               # Composition root HTTP server (JSON API + SPA static handler)
-├── docker/                   # Docker Compose database target, seed 500k row, & skrip helper
-├── docs/                     # Dokumentasi arsitektur M1/M2, observability, & hasil CodeQL SAST
+│   ├── server/               # Composition root HTTP server (JSON API + SPA static handler)
+│   └── worker/               # Service worker eksekusi migration asynchronous + Prometheus /metrics
+├── docker/                   # Docker Compose DB target, seed 500k row, OTel/Loki/Jaeger/Prometheus/Grafana, & k6
+├── docs/                     # Dokumentasi arsitektur M1/M2, observability, benchmark, & hasil CodeQL SAST
 ├── frontend/                 # Aplikasi SPA React 18 + TypeScript + Vite + Tailwind CSS
 │   ├── src/
 │   │   ├── api/              # Fetch client dengan manajemen CSRF otomatis & modul endpoint
-│   │   ├── components/       # AppShell responsif, ProtectedRoute, ConfirmDialog, shared UI states
+│   │   ├── components/       # AppShell responsif, ProtectedRoute, ConfirmDialog, ExecuteDialog, UI states
 │   │   ├── context/          # AuthContext & ToastContext
-│   │   ├── pages/            # Halaman Login, Dashboard, Viewer, Admin, Audit, & shell P3/P4
+│   │   ├── pages/            # Halaman Login, Dashboard, Viewer, Admin, Audit, Migrations, Approvals, & Jobs
 │   │   └── types/            # Kontrak tipe data TypeScript untuk JSON API
 │   ├── package.json
 │   ├── vite.config.ts
@@ -286,15 +306,16 @@ TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
 │   ├── contract/             # Antarmuka, tipe data bersama, dan principal context
 │   ├── dbdriver/             # Driver Postgres & MySQL/MariaDB (introspeksi katalog aman, rows, exec)
 │   ├── explain/              # Parser execution plan EXPLAIN / ANALYZE
-│   ├── lifecycle/            # Migration revisions, approvals, execution runs, & attempts
-│   ├── migration/            # Repository, service eksekusi transaksional, & read JSON API
-│   ├── observability/        # Structured JSON logger (slog + redaction), W3C tracer, & metrics recorder
+│   ├── jobs/                 # Durable queue, worker lease, advisory lock, target ledger, batch/compensate, & PromMetrics
+│   ├── lifecycle/            # Migration revisions, Parse validation, approvals, linear rollback/forward, & attempts
+│   ├── migration/            # Repository, service eksekusi transaksional M1, & read JSON API
+│   ├── observability/        # Structured JSON logger (slog + redaction), W3C tracer, OTLP logs/traces/metrics, & Prom metrics
 │   ├── password/             # Hashing & verifikasi password PBKDF2-SHA256
 │   ├── schemadiff/           # Komparasi snapshot skema & generator DDL
 │   ├── session/              # Store session PostgreSQL, rotasi privilege_version, & grace period
 │   ├── viewer/               # Handler & JSON API database viewer dengan structured SQL read-only logging
 │   └── web/                  # Middleware CSRF (form & JSON header), security headers, & SPA handler
-├── migrations_meta/          # SQL migration additive untuk database metadata platform (001 s.d. 006)
+├── migrations_meta/          # SQL migration additive untuk database metadata platform (001 s.d. 007)
 └── web/                      # Template & asset legacy M1 (dipertahankan untuk kompatibilitas unit test M1)
 ```
 
@@ -302,29 +323,52 @@ TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
 
 ## 9. [BONUS] Observability Stack & Stress Testing (`k6`)
 
-### A. Menjalankan Observability Stack (OTel Collector, Prometheus, Grafana)
+### A. Menjalankan Observability Stack (OTel Collector, Loki, Jaeger, Prometheus, Grafana)
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d otel-collector prometheus grafana
+docker compose -f docker/docker-compose.yml up -d jaeger loki otel-collector prometheus grafana
+
+# Jalankan API dan Worker dengan pengiriman OTLP ke OpenTelemetry Collector (:4318)
+set -a && source .env && set +a
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+go run ./cmd/server
+# Terminal lain:
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 WORKER_ID=worker-1 WORKER_METRICS_ADDR=:9091 go run ./cmd/worker
 ```
 
-- **Endpoint Prometheus Metrics**: `GET http://localhost:8080/metrics` (API) dan `GET http://localhost:9091/metrics` (Worker).
-- **Prometheus UI**: `http://localhost:9090`
-- **Grafana Dashboard**: `http://localhost:3000` (login: `admin` / `admin`) — otomatis memuat dashboard **"IF3110 M2 — Migration Queue & DB Connection Pool"** dari [`docker/observability/grafana/dashboards/if3110-dbplatform.json`](docker/observability/grafana/dashboards/if3110-dbplatform.json).
-- **OTLP Trace Export**: Set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` saat menjalankan server/worker untuk meneruskan span secara otomatis ke OpenTelemetry Collector.
+- **Pipeline OpenTelemetry Collector** ([`docker/observability/otel-collector-config.yaml`](docker/observability/otel-collector-config.yaml)):
+  - **Logs (`/v1/logs`)** → **Grafana Loki** (`http://localhost:3100`, [`docker/observability/loki-config.yaml`](docker/observability/loki-config.yaml))
+  - **Traces (`/v1/traces`)** → **Jaeger** (`http://localhost:16686`) menghubungkan span lintas proses `if3110-api` → queue → `if3110-worker` dalam satu `trace_id`
+  - **Metrics (`/metrics` & `/v1/metrics`)** → `GET http://localhost:8080/metrics` (API), `GET http://localhost:9091/metrics` (Worker), dan exporter Collector `:8889` yang di-scrape oleh **Prometheus** (`http://localhost:9090`) dengan kardinalitas label terbatas (`status`, `pool`, `state` — tanpa `user_id`, `job_id`, maupun `SQL`)
+- **Grafana Dashboard & Korelasi**: `http://localhost:3000` (login: `admin` / `admin`) — otomatis mem-provision datasource **Prometheus**, **Loki**, dan **Jaeger** beserta korelasi dua arah `trace_id` ↔ log ([`datasources.yaml`](docker/observability/grafana/provisioning/datasources/datasources.yaml)) serta dashboard 7 panel **"IF3110 M2 — Migration Queue, DB Pool & Correlated Logs"** ([`if3110-dbplatform.json`](docker/observability/grafana/dashboards/if3110-dbplatform.json)).
 
 ### B. Stress Testing dengan `k6` ([`docker/k6/stress_test.js`](docker/k6/stress_test.js))
 
-Script `k6` menguji akses API (`GET /api/databases`, `GET /api/databases/{id}/schema`, `GET /api/audit-logs`) dan pengiriman job migration yang sudah **Approved** secara bersamaan pada database yang sama (`DB_ID_A`) maupun database berbeda (`DB_ID_B`), lalu memantau status job (`GET /api/v2/jobs/{id}`) hingga selesai. Respons `202 Accepted` tidak dihitung sebagai keberhasilan eksekusi migration.
+#### Penjelasan Singkat Script
+1. **`setup()`**: Login menggunakan sesi + CSRF, membuat tabel probe awal, lalu menyiapkan **90 migration request yang sudah melewati `Submit` dan `Approve`** (`45` pada `DB_ID_A` dan `45` pada `DB_ID_B`) sebelum beban dimulai.
+2. **Beban Bertahap & Pemulihan (`stages`)**: Meningkatkan beban dari `0 → 10 VUs` (baseline normal, `20s`), naik ke `30 VUs` (`30s`), puncak stress `60 VUs` (`30s`), lalu diturunkan kembali ke `10 VUs` (`20s`) dan `0 VUs` (`10s`) dengan `noCookiesReset: true` untuk mensimulasikan sesi SPA nyata.
+3. **Akses API & Job Konkuren (DB Sama & Berbeda)**: Setiap VU mengakses endpoint baca secara paralel (`GET /api/databases`, `GET /api/databases/{id}/schema`, `GET /api/v2/databases/{id}/history`, `GET /api/v2/jobs`, `GET /api/audit-logs`), sambil mengeksekusi migration **Approved** secara bersamaan baik berupa *paired burst* pada database yang sama (`DB_ID_A` — menguji antrean & lock per-DB) maupun paralel lintas database (`DB_ID_A` vs `DB_ID_B`), lalu melakukan polling `GET /api/v2/jobs/{id}` hingga status terminal `success` (**respons `202 Accepted` tidak pernah dihitung sebagai keberhasilan eksekusi migration**).
+4. **Threshold**: `http_req_duration: ['p(50)<150', 'p(95)<500']`, `api_response_time_ms: ['p(95)<500']`, `http_req_failed: ['rate<0.05']`, dan `api_error_rate: ['rate<0.05']`.
 
-- **Threshold**: `p(95) < 500 ms`, `p(50) < 150 ms`, dan `error_rate < 5%`.
-- **Metrik Kustom**: `api_response_time_ms` (`p50`, `p95`), `api_error_rate`, `job_queue_wait_ms`, `job_completion_duration_ms`, dan `jobs_completed_total`.
+```bash
+docker run --rm -i --network=host \
+  -e BASE_URL=http://localhost:8080 \
+  -e ADMIN_USER=admin -e ADMIN_PASS=1234567891011121314 \
+  -e DB_ID_A=1 -e DB_ID_B=2 \
+  grafana/k6:0.54.0 run - < docker/k6/stress_test.js
+```
 
-#### Ringkasan Skenario & Analisis per Tingkat Beban
+#### Hasil Pengukuran Aktual (Lingkungan Uji: Intel Core i3-N305 8 vCPU, 6,9 GiB RAM, PostgreSQL 16.16)
 
-| Tingkat Beban | Durasi | Target VU | Perilaku & Analisis Sistem |
-|---|---:|---:|---|
-| **1. Baseline Normal** | `20s` | `10 VUs` | Latensi API (`p50`/`p95`) rendah dan stabil; koneksi pool (`MaxOpenConns=10`) tidak mengalami antrean (`pool_wait = 0`), job langsung diklaim worker dengan waktu tunggu queue minimal. |
-| **2. Elevated Load** | `30s` | `30 VUs` | Throughput request meningkat; job pada database berbeda (`DB_ID_A` vs `DB_ID_B`) dieksekusi paralel oleh worker, sedangkan job pada database yang sama mengantre secara aman di belakang advisory lock per-database. |
-| **3. Peak Stress** | `30s` | `60 VUs` | Waktu tunggu queue (`job_queue_wait_ms`) dan connection pool wait naik karena batas `MaxOpenConns(10)` melindungi PostgreSQL target dari *connection exhaustion*, namun API tetap merespons cepat karena eksekusi SQL berjalan asynchronous di worker. |
-| **4. Recovery** | `20s` | `10 VUs` | Beban diturunkan kembali ke normal; backlog job di antrean dikuras habis oleh worker, koneksi *in-use* turun kembali ke *idle*, dan `p95` response time API pulih ke level baseline tanpa kebocoran goroutine atau *deadlock*. |
+- **Total Request & Throughput**: **`32.835` HTTP requests** (**`289,48 req/s`**), `6.438` iterasi (`56,76 iter/s`), checks lulus **`100,00%`** (`12.876 / 12.876`).
+- **Response Time API Keseluruhan**: **`p50 = 7,51 ms`** (`http_req_duration p50 = 7,50 ms` ✓ `< 150 ms`), **`p95 = 40,58 ms`** (`http_req_duration p95 = 41,23 ms` ✓ `< 500 ms`), `avg = 14,12 ms`.
+- **Error Rate**: **`0,00%`** (`0 / 32.835` gagal ✓ `< 5%`).
+- **Waktu Tunggu Queue (`job_queue_wait_ms`)**: `p50 = 95,50 ms`, `p95 = 219,39 ms`, `avg = 103,57 ms`, `max = 287,00 ms`.
+- **Durasi & Throughput Penyelesaian Job (`job_completion_duration_ms` & `jobs_completed_total`)**: **`90` migration job selesai `success`** (**`0,793 job/detik`** sepanjang tes; 100% job Approved yang dikirim selesai tuntas), dengan durasi end-to-end `p50 = 137,50 ms`, `p95 = 252,30 ms`, `avg = 142,12 ms`.
+
+| Tingkat Beban | Durasi | Target VU | `p50` API | `p95` API | `avg` API | Analisis Perilaku Sistem |
+|---|---:|---:|---:|---:|---:|---|
+| **1. Baseline Normal** | `20s` | `0 → 10 VUs` | `5,17 ms` | `19,96 ms` | `7,99 ms` | Latensi sangat rendah dan stabil; pool metadata (`MaxOpenConns=25`) & target DB memiliki banyak koneksi idle tanpa antrean koneksi. |
+| **2. Elevated Load** | `30s` | `10 → 30 VUs` | `6,66 ms` | `28,81 ms` | `10,52 ms` | Beban 3× baseline; job pada `DB_ID_A` dan `DB_ID_B` berjalan paralel di `cmd/worker` (`concurrency=4`), sementara *burst* pada `DB_ID_A` diserialisasi rapi oleh advisory lock per-DB (`queue_wait ~95 ms`). |
+| **3. Peak Stress** | `30s` | `30 → 60 VUs` | `8,15 ms` | `40,97 ms` | `14,12 ms` | Beban puncak 6× baseline (~290 req/s); `p95` naik moderat ke `40,97 ms` (jauh di bawah batas `500 ms`) karena API hanya mempublikasikan job ke tabel antrean tanpa menahan transaksi DDL/DML target di HTTP handler, dengan `0,00%` error. |
+| **4–5. Recovery & Cooldown** | `30s` | `60 → 10 → 0 VUs` | `7,34 ms` | `57,21 ms` | `16,59 ms` | Saat VU diturunkan kembali ke `10` lalu `0`, median (`p50`) langsung pulih turun dari `8,15 ms` ke `7,34 ms`; ekor `p95` awal menguras sisa request puncak lalu seluruh 90 job selesai bersih (`queued = 0`, koneksi kembali `idle`, tanpa deadlock/leak). |

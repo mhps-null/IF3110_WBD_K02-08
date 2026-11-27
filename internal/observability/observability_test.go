@@ -466,6 +466,25 @@ func TestOTLPAndMultiSpanExporter(t *testing.T) {
 		return nil, errors.New("collector unreachable")
 	})
 	otlpExp.ExportSpan(SpanRecord{Name: "unreachable_test"})
+
+	// Verify OTLP log exporter & NewDefaultLogger forward correlated JSON logs to /v1/logs
+	var logPayload []byte
+	var logPath string
+	logExp := NewOTLPLogExporter("http://otel-collector:4318", "if3110-worker")
+	logExp.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		logPath = r.URL.Path
+		logPayload, _ = io.ReadAll(r.Body)
+		rec := httptest.NewRecorder()
+		rec.WriteHeader(http.StatusOK)
+		return rec.Result(), nil
+	})
+	logExp.ExportLogLine([]byte(`{"time":"2026-11-27T00:00:00Z","level":"INFO","event":"migration.attempt","actor":"user:1","database":"ecommerce_pg","status":"success","correlation_id":"corr-1","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7"}`))
+	if logPath != "/v1/logs" {
+		t.Fatalf("expected OTLP log path /v1/logs, got %s", logPath)
+	}
+	if !strings.Contains(string(logPayload), `"traceId":"4bf92f3577b34da6a3ce929d0e0e4736"`) || !strings.Contains(string(logPayload), `"stringValue":"if3110-worker"`) {
+		t.Fatalf("expected OTLP log payload to carry traceId and service.name, got: %s", string(logPayload))
+	}
 }
 
 func TestObservabilityBonusArtifactsValidation(t *testing.T) {

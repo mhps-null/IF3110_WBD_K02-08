@@ -1,4 +1,4 @@
-# OpenTelemetry Collector configuration for logs, traces, and metrics.
+# OpenTelemetry Collector configuration forwarding logs -> Loki, traces -> Jaeger, and metrics -> Prometheus.
 receivers:
   otlp:
     protocols:
@@ -9,25 +9,34 @@ receivers:
 
 processors:
   batch:
-    timeout: 2s
-    send_batch_size: 512
+    timeout: 1s
+    send_batch_size: 256
 
 exporters:
   debug:
-    verbosity: detailed
+    verbosity: basic
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
   prometheus:
     endpoint: 0.0.0.0:8889
+    add_metric_suffixes: false
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug]
+      exporters: [otlp/jaeger, debug]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug]
+      exporters: [otlphttp/loki, debug]
     metrics:
       receivers: [otlp]
       processors: [batch]

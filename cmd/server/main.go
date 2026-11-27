@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,9 +32,10 @@ import (
 )
 
 func main() {
-	obsLogger := observability.NewLogger(os.Stdout, slog.LevelInfo)
+	obsLogger := observability.NewDefaultLogger(os.Stdout, slog.LevelInfo, "if3110-api")
+	defer obsLogger.Close()
 	logger := obsLogger.Slog()
-	tracer := observability.NewTracer("api", observability.NewDefaultSpanExporter(os.Stderr))
+	tracer := observability.NewTracer("if3110-api", observability.NewDefaultSpanExporter(os.Stderr))
 	metrics := observability.NewInMemoryMetrics()
 
 	cfg, err := config.Load()
@@ -48,8 +50,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
 	pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
@@ -147,6 +149,8 @@ func main() {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		ms := db.Stats()
+		metrics.SetPoolSnapshot("api_metadata_db", ms.InUse, ms.Idle, ms.WaitCount, ms.WaitDuration)
 		for _, ps := range poolManager.PoolStats() {
 			metrics.SetPoolSnapshot(ps.DBName, ps.InUse, ps.Idle, ps.WaitCount, ps.WaitDuration)
 		}
@@ -177,6 +181,17 @@ func main() {
 
 	stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	observability.StartOTLPMetricsPusher(stopCtx, "if3110-api", func() string {
+		ms := db.Stats()
+		metrics.SetPoolSnapshot("api_metadata_db", ms.InUse, ms.Idle, ms.WaitCount, ms.WaitDuration)
+		for _, ps := range poolManager.PoolStats() {
+			metrics.SetPoolSnapshot(ps.DBName, ps.InUse, ps.Idle, ps.WaitCount, ps.WaitDuration)
+		}
+		var rec httpResponseBuffer
+		metrics.Handler().ServeHTTP(&rec, &http.Request{Method: http.MethodGet})
+		return rec.body.String()
+	}, 4*time.Second)
 	select {
 	case <-stopCtx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -190,3 +205,17 @@ func main() {
 		}
 	}
 }
+
+type httpResponseBuffer struct {
+	hdr  http.Header
+	body strings.Builder
+}
+
+func (r *httpResponseBuffer) Header() http.Header {
+	if r.hdr == nil {
+		r.hdr = make(http.Header)
+	}
+	return r.hdr
+}
+func (r *httpResponseBuffer) Write(p []byte) (int, error) { return r.body.Write(p) }
+func (r *httpResponseBuffer) WriteHeader(int)             {}

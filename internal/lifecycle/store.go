@@ -492,7 +492,7 @@ func (s *Store) QueueWith(ctx context.Context, id, actor int64, hook QueueHook) 
 	if err = lockDB(ctx, tx, q.DBID); err != nil {
 		return 0, err
 	}
-	if err = eligibleTx(ctx, tx, q); err != nil {
+	if err = eligibleModeTx(ctx, tx, q, eligibilityEnqueue); err != nil {
 		return 0, err
 	}
 	if err = validateApproverSnapshot(ctx, tx, id, q.DBID); err != nil {
@@ -713,7 +713,7 @@ func (s *Store) Claim(ctx context.Context, requestID int64) (bool, error) {
 	if err = lockDB(ctx, tx, q.DBID); err != nil {
 		return false, err
 	}
-	if err = eligibleTx(ctx, tx, q); err != nil {
+	if err = eligibleModeTx(ctx, tx, q, eligibilityClaim); err != nil {
 		return false, err
 	}
 	if err = validateApproverSnapshot(ctx, tx, requestID, q.DBID); err != nil {

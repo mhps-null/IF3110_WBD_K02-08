@@ -863,10 +863,11 @@ func (w *Worker) batchGate(r *run, req lifecycle.Request, attempt, committedNet 
 	}
 	if r.cancel() {
 		msg := fmt.Sprintf("cancelled by user after %d committed batch(es); committed batches are kept", committedNet)
-		if _, err := w.domain.RecordAttempt(r.book, req.ID, r.actor(req), lifecycle.Failed, attempt, msg); err != nil {
+		execID, err := w.domain.RecordAttempt(r.book, req.ID, r.actor(req), lifecycle.Failed, attempt, msg)
+		if err != nil {
 			return true, w.requeue(r, StatusUncertain, w.cfg.UncertainRecheck, "cannot record cancelled attempt: "+safeErr(err))
 		}
-		w.logAttempt(r, req, attempt, lifecycle.Failed, msg)
+		w.logAttempt(r, req, execID, attempt, lifecycle.Failed, msg)
 		status := StatusCancelled
 		if committedNet > 0 {
 			status = StatusPartial
@@ -930,12 +931,13 @@ func (w *Worker) batchFailed(r *run, req lifecycle.Request, attempt, seq, commit
 }
 
 func (w *Worker) succeed(r *run, req lifecycle.Request, attempt int, msg string) error {
-	if _, err := w.domain.RecordAttempt(r.book, req.ID, r.actor(req), lifecycle.Success, attempt, ""); err != nil {
+	execID, err := w.domain.RecordAttempt(r.book, req.ID, r.actor(req), lifecycle.Success, attempt, "")
+	if err != nil {
 		// The target committed but metadata is unreachable: keep the job
 		// uncertain; the next delivery proves the commit via the ledger.
 		return w.requeue(r, StatusUncertain, w.cfg.UncertainRecheck, "committed, but recording the attempt failed: "+safeErr(err))
 	}
-	w.logAttempt(r, req, attempt, lifecycle.Success, "")
+	w.logAttempt(r, req, execID, attempt, lifecycle.Success, "")
 	return w.finish(r, StatusSuccess, msg)
 }
 
@@ -948,10 +950,11 @@ func (w *Worker) failAttempt(r *run, req lifecycle.Request, attempt int, outcome
 // schedules a bounded retry with backoff or finalizes failed / partial.
 func (w *Worker) failAttemptBatch(r *run, req lifecycle.Request, attempt int, outcome Outcome, msg string, committedNet int) error {
 	msg = migration.SanitizeErrorText(msg)
-	if _, err := w.domain.RecordAttempt(r.book, req.ID, r.actor(req), lifecycle.Failed, attempt, msg); err != nil {
+	execID, err := w.domain.RecordAttempt(r.book, req.ID, r.actor(req), lifecycle.Failed, attempt, msg)
+	if err != nil {
 		return w.requeue(r, StatusUncertain, w.cfg.UncertainRecheck, "cannot record failed attempt: "+safeErr(err))
 	}
-	w.logAttempt(r, req, attempt, lifecycle.Failed, msg)
+	w.logAttempt(r, req, execID, attempt, lifecycle.Failed, msg)
 	final := StatusFailed
 	if committedNet > 0 {
 		final = StatusPartial
@@ -1076,8 +1079,9 @@ func (w *Worker) sqlEvent(r *run, req lifecycle.Request, sqlText string, attempt
 	}
 }
 
-func (w *Worker) logAttempt(r *run, req lifecycle.Request, attempt int, status, msg string) {
+func (w *Worker) logAttempt(r *run, req lifecycle.Request, execID int64, attempt int, status, msg string) {
 	ev := w.sqlEvent(r, req, "", attempt, 0)
+	ev.ExecutionID = execID
 	ev.Status = status
 	if msg != "" {
 		ev.Err = errors.New(msg)

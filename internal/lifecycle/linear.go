@@ -97,7 +97,19 @@ func replayHistory(items []committed) (linearHistory, error) {
 	return history, nil
 }
 
+type eligibilityMode int
+
+const (
+	eligibilityReview  eligibilityMode = iota // Submit, RefreshReview, CreateAction
+	eligibilityEnqueue                        // QueueWith (Execute)
+	eligibilityClaim                          // Worker Claim & Revalidate
+)
+
 func eligibleTx(ctx context.Context, tx *sql.Tx, q Request) error {
+	return eligibleModeTx(ctx, tx, q, eligibilityReview)
+}
+
+func eligibleModeTx(ctx context.Context, tx *sql.Tx, q Request, mode eligibilityMode) error {
 	items, err := committedTx(ctx, tx, q.DBID)
 	if err != nil {
 		return err
@@ -107,17 +119,27 @@ func eligibleTx(ctx context.Context, tx *sql.Tx, q Request) error {
 		return err
 	}
 
-	// A database is busy while another request is queued/running, or while the
-	// job engine holds it (partial batch, partially reverted, compensating, or an
-	// unverified commit outcome). Only the holding request itself may proceed.
-	var busy bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM migration_requests WHERE db_id=$1 AND id<>$2 AND status IN ('pending','running'))
-		OR EXISTS(SELECT 1 FROM migration_db_holds WHERE db_id=$1 AND request_id<>$2)`, q.DBID, q.ID).Scan(&busy)
+	// A database held by a partial/partially-reverted/compensating/uncertain job
+	// blocks other migrations until resolved (Spec: "Tahan migration berikutnya...").
+	var held bool
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM migration_db_holds WHERE db_id=$1 AND request_id<>$2)`, q.DBID, q.ID).Scan(&held)
 	if err != nil {
 		return err
 	}
-	if busy {
+	if held {
 		return ErrConflict
+	}
+
+	// At worker claim/revalidation time, at most one request may be running on this DB.
+	if mode == eligibilityClaim {
+		var runningOther bool
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM migration_requests WHERE db_id=$1 AND id<>$2 AND status='running')`, q.DBID, q.ID).Scan(&runningOther)
+		if err != nil {
+			return err
+		}
+		if runningOther {
+			return ErrConflict
+		}
 	}
 
 	switch q.Action {
@@ -127,8 +149,30 @@ func eligibleTx(ctx context.Context, tx *sql.Tx, q Request) error {
 				return ErrConflict
 			}
 		}
+		if mode == eligibilityEnqueue {
+			var sameMigrationActive bool
+			err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM migration_requests WHERE db_id=$1 AND id<>$2 AND migration_id=$3 AND status IN ('pending','running'))`,
+				q.DBID, q.ID, q.MigrationID).Scan(&sameMigrationActive)
+			if err != nil {
+				return err
+			}
+			if sameMigrationActive {
+				return ErrConflict
+			}
+		}
 
 	case Rollback, Forward:
+		if mode != eligibilityClaim {
+			var inFlight bool
+			err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM migration_requests WHERE db_id=$1 AND id<>$2 AND status IN ('pending','running'))`,
+				q.DBID, q.ID).Scan(&inFlight)
+			if err != nil {
+				return err
+			}
+			if inFlight {
+				return ErrConflict
+			}
+		}
 		source := history.source(q.Action)
 		if source.id == 0 || q.TargetExecutionID == nil || source.id != *q.TargetExecutionID ||
 			source.migration != q.MigrationID || source.revision != q.RevisionID {
