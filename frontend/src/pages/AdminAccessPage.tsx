@@ -4,10 +4,12 @@ import { AlertTriangle, Crown, KeyRound, Save } from 'lucide-react';
 import { adminApi } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import type { AccessMatrixResponse } from '../types/api';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Badge, EmptyState, ErrorState, LoadingState, PageHeader } from '../components/shared/UIStates';
 
 export function AdminAccessPage() {
+  const { refreshSession } = useAuth();
   const { notify } = useToast();
   const [matrix, setMatrix] = useState<AccessMatrixResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,7 +49,7 @@ export function AdminAccessPage() {
     try {
       const res = await adminApi.setAccess(groupId, dbId, Number(level));
       notify('success', res.message);
-      await load();
+      await Promise.all([load(), refreshSession()]);
     } catch (err) {
       notify('error', err instanceof ApiError ? err.message : 'Gagal menyimpan hak akses.');
     } finally {

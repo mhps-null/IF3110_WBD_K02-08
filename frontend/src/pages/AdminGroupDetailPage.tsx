@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowLeft, Crown, Save, UserMinus, UserPlus } from 'luci
 import { adminApi } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import type { AdminUser, GroupDetailResponse } from '../types/api';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Badge, ErrorState, LoadingState, PageHeader } from '../components/shared/UIStates';
 import { ConfirmDialog } from '../components/shared/ConfirmDialog';
@@ -11,6 +12,7 @@ import { ConfirmDialog } from '../components/shared/ConfirmDialog';
 export function AdminGroupDetailPage() {
   const { id } = useParams<{ id: string }>();
   const groupId = Number(id);
+  const { refreshSession } = useAuth();
   const { notify } = useToast();
 
   const [detail, setDetail] = useState<GroupDetailResponse | null>(null);
@@ -61,7 +63,7 @@ export function AdminGroupDetailPage() {
     try {
       const res = await adminApi.updateGroup(groupId, name.trim(), description.trim());
       notify('success', res.message);
-      await load();
+      await Promise.all([load(), refreshSession()]);
     } catch (err) {
       notify('error', err instanceof ApiError ? err.message : 'Gagal memperbarui group.');
     } finally {
@@ -78,7 +80,7 @@ export function AdminGroupDetailPage() {
       const res = await adminApi.addMember(groupId, uid);
       notify('success', res.message);
       setSelectedUserId('');
-      await load();
+      await Promise.all([load(), refreshSession()]);
     } catch (err) {
       notify('error', err instanceof ApiError ? err.message : 'Gagal menambahkan anggota.');
     } finally {
@@ -93,7 +95,7 @@ export function AdminGroupDetailPage() {
       const res = await adminApi.removeMember(groupId, removeTarget.id);
       notify('success', res.message);
       setRemoveTarget(null);
-      await load();
+      await Promise.all([load(), refreshSession()]);
     } catch (err) {
       notify('error', err instanceof ApiError ? err.message : 'Gagal menghapus anggota.');
     } finally {
@@ -108,7 +110,7 @@ export function AdminGroupDetailPage() {
       const leaderId = selectedLeaderId === '' ? null : Number(selectedLeaderId);
       const res = await adminApi.setGroupLeader(groupId, leaderId);
       notify('success', res.message);
-      await load();
+      await Promise.all([load(), refreshSession()]);
     } catch (err) {
       notify('error', err instanceof ApiError ? err.message : 'Gagal memperbarui leader group.');
     } finally {
