@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { authApi } from '../api/endpoints';
-import { onUnauthorized } from '../api/client';
+import { ApiError, onUnauthorized } from '../api/client';
 import type { AccessibleDatabase, Principal, UserGroupMembership } from '../types/api';
 
 interface AuthContextValue {
@@ -33,8 +33,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(data.user);
       setGroups(data.groups ?? []);
       setAccessibleDatabases(data.accessible_databases ?? []);
-    } catch {
-      clearState();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearState();
+      }
     } finally {
       setLoading(false);
     }
