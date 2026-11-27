@@ -113,7 +113,7 @@ set -a && source .env && set +a
 WORKER_ID=worker-1 WORKER_METRICS_ADDR=:9091 go run ./cmd/worker
 ```
 
-Setiap eksekusi migration (termasuk rollback/forward) **hanya** dipublikasikan sebagai job oleh API; SQL dijalankan oleh `cmd/worker`. Tanpa worker, job tetap tersimpan durable di antrean (`Pending (Queue)`) dan diproses ketika worker berjalan. Metrics Prometheus worker tersedia di `http://localhost:9091/metrics`. Detail desain: [`docs/m2-person4.md`](docs/m2-person4.md).
+Setiap eksekusi migration (termasuk rollback/forward) **hanya** dipublikasikan sebagai job oleh API; SQL dijalankan oleh `cmd/worker`. Tanpa worker, job tetap tersimpan durable di antrean (`Pending (Queue)`) dan diproses ketika worker berjalan. Metrics Prometheus worker tersedia di `http://localhost:9091/metrics`. Detail arsitektur dan mekanisme recovery: [`docs/architecture.md`](docs/architecture.md).
 
 Buka browser di **`http://localhost:8080`** dan login menggunakan kredensial Platform Admin.
 
@@ -146,7 +146,7 @@ Untuk menghentikan container:
 ./docker/stop-test-dbs.sh
 ```
 
-Panduan skenario pengujian manual tersedia di [`docker/README_DOCKER_TESTING.md`](docker/README_DOCKER_TESTING.md) dan dokumentasi benchmark dataset besar tersedia di [`docs/m2-observability-and-dataset.md`](docs/m2-observability-and-dataset.md).
+Panduan skenario pengujian container tersedia di [`docker/README_DOCKER_TESTING.md`](docker/README_DOCKER_TESTING.md) dan dokumentasi benchmark dataset besar (`> 1 detik`) tersedia di [`docs/observability-and-benchmark.md`](docs/observability-and-benchmark.md).
 
 ---
 
@@ -210,14 +210,14 @@ Seluruh endpoint mutasi (`POST`, `PUT`, `PATCH`, `DELETE`) mewajibkan cookie CSR
 | `/` | Login | Dashboard ringkasan database, keanggotaan group, dan peran leader |
 | `/databases` | Login | Pemilihan database target & ringkasan hak akses efektif |
 | `/databases/:id/schema` | View Only | Explorer skema, kolom, constraint, index, data tabel (read-only), & status approver group |
-| `/databases/:id/migrations`, `/migrations` | View Only | Riwayat migrasi & shell integrasi Migration Editor / Approval / History (Orang 3) |
-| `/approvals` | Login | Review Inbox & ringkasan group yang dipimpin user (shell integrasi Orang 3) |
-| `/jobs` | Login | Job Monitoring & Batch Progress (shell integrasi Orang 4) |
+| `/databases/:id/migrations`, `/migrations` | View Only | Editor migration (Up/Down/Irreversible), validasi sintaks, pengajuan rollback/forward, & riwayat eksekusi |
+| `/approvals` | Login | Review Inbox persetujuan multi-group oleh Group Leader |
+| `/jobs` | Login | Pemantauan job asynchronous, progres batch/cursor, checkpoint, resume, & kompensasi |
 | `/admin/connections` | Platform Admin | Manajemen koneksi database, test koneksi, & monitor connection pool |
 | `/admin/users` | Platform Admin | Manajemen akun user, status aktif, reset password, & hak admin |
 | `/admin/groups`, `/admin/groups/:id` | Platform Admin | Manajemen group, anggota, dan penetapan Group Leader |
 | `/admin/access` | Platform Admin | Matriks hak akses group ↔ database & indikator kelengkapan leader |
-| `/audit-logs` | Platform Admin | Penelusuran & filter platform audit logs (terintegrasi dengan modul Orang 2) |
+| `/audit-logs` | Platform Admin | Penelusuran & filter platform audit logs |
 
 ---
 
@@ -265,12 +265,9 @@ TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
 
 ## 7. Dokumentasi Teknis & Keamanan
 
-- **Arsitektur SPA, JSON API, & Group Leader (Orang 1):** [`docs/m2-p1-spa-and-auth.md`](docs/m2-p1-spa-and-auth.md)
-- **Observability, Structured Logging/Tracing, Audit Log, & Dataset 500k Row (Orang 2):** [`docs/m2-observability-and-dataset.md`](docs/m2-observability-and-dataset.md)
-- **Migration Lifecycle, Multi-Group Approval, Rollback/Forward, & History (Orang 3):** [`docs/m2-person3.md`](docs/m2-person3.md)
-- **Async Engine: Queue, Worker, Lock, Batch, Retry, Recovery, & Job Monitoring (Orang 4):** [`docs/m2-person4.md`](docs/m2-person4.md)
-- **[BONUS] SAST dengan GitHub CodeQL (Temuan, Perbaikan, & Rescan):** [`docs/codeql-sast.md`](docs/codeql-sast.md)
-- **Dokumen Desain Fondasi M1:** [`docs/auth-session.md`](docs/auth-session.md), [`docs/access-control.md`](docs/access-control.md), [`docs/db-management.md`](docs/db-management.md), [`docs/migration.md`](docs/migration.md), [`docs/schema-diff.md`](docs/schema-diff.md), [`docs/p1-integration-notes.md`](docs/p1-integration-notes.md)
+- **Arsitektur Sistem, Keamanan, Lifecycle Migration, & Async Engine (Lock/Crash Recovery):** [`docs/architecture.md`](docs/architecture.md)
+- **Observability (OTel/Loki/Jaeger/Prometheus/Grafana), Benchmark Dataset > 1s, & Stress Testing (`k6`):** [`docs/observability-and-benchmark.md`](docs/observability-and-benchmark.md)
+- **[BONUS] Security SAST dengan GitHub CodeQL (Temuan, Perbaikan, & Rescan):** [`docs/codeql-sast.md`](docs/codeql-sast.md)
 
 ---
 
@@ -285,7 +282,11 @@ TEST_METADATA_DSN="$TEST_DATABASE_URL" go test -tags=integration -count=1 ./...
 │   ├── server/               # Composition root HTTP server (JSON API + SPA static handler)
 │   └── worker/               # Service worker eksekusi migration asynchronous + Prometheus /metrics
 ├── docker/                   # Docker Compose DB target, seed 500k row, OTel/Loki/Jaeger/Prometheus/Grafana, & k6
-├── docs/                     # Dokumentasi arsitektur M1/M2, observability, benchmark, & hasil CodeQL SAST
+├── docs/
+│   ├── architecture.md               # Desain terpadu SPA, Auth/RBAC, Lifecycle, Queue, Lock Recovery, & Batch
+│   ├── codeql-sast.md                # Laporan temuan, analisis dampak, perbaikan, & rescan GitHub CodeQL
+│   ├── observability-and-benchmark.md # Benchmark dataset >1s, korelasi log/trace, Grafana, & hasil stress test k6
+│   └── preview.png                   # Preview antarmuka platform
 ├── frontend/                 # Aplikasi SPA React 18 + TypeScript + Vite + Tailwind CSS
 │   ├── src/
 │   │   ├── api/              # Fetch client dengan manajemen CSRF otomatis & modul endpoint
