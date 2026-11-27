@@ -4,11 +4,13 @@ import { AlertTriangle, Crown, Plus, Settings, Trash2, Users } from 'lucide-reac
 import { adminApi } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import type { AdminGroup } from '../types/api';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Badge, EmptyState, ErrorState, LoadingState, PageHeader } from '../components/shared/UIStates';
 import { ConfirmDialog } from '../components/shared/ConfirmDialog';
 
 export function AdminGroupsPage() {
+  const { refreshSession } = useAuth();
   const { notify } = useToast();
   const [groups, setGroups] = useState<AdminGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,7 +67,7 @@ export function AdminGroupsPage() {
       const res = await adminApi.deleteGroup(deleteTarget.id);
       notify('success', res.message);
       setDeleteTarget(null);
-      await load();
+      await Promise.all([load(), refreshSession()]);
     } catch (err) {
       notify('error', err instanceof ApiError ? err.message : 'Gagal menghapus group.');
     } finally {

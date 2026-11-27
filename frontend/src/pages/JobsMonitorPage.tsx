@@ -51,9 +51,13 @@ function ProgressBar({ value }: { value: number }) {
 type Pending = { kind: 'resume' | 'cancel' | 'compensate'; job: MigrationJob } | null;
 
 export function JobsMonitorPage() {
-  const { accessibleDatabases } = useAuth();
+  const { accessibleDatabases, refreshSession } = useAuth();
   const { notify } = useToast();
   const [params, setParams] = useSearchParams();
+
+  useEffect(() => {
+    void refreshSession();
+  }, [refreshSession]);
   const selectedId = Number(params.get('job') || 0);
   const [dbFilter, setDbFilter] = useState<number>(Number(params.get('db') || 0));
   const [statusFilter, setStatusFilter] = useState<string>('');

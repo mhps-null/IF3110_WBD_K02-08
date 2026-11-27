@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Activity,
@@ -16,8 +17,12 @@ import { useAuth } from '../context/AuthContext';
 import { Badge, PageHeader } from '../components/shared/UIStates';
 
 export function DashboardPage() {
-  const { user, groups, accessibleDatabases } = useAuth();
+  const { user, groups, accessibleDatabases, refreshSession } = useAuth();
   const leaderGroups = groups.filter((g) => g.is_leader);
+
+  useEffect(() => {
+    void refreshSession();
+  }, [refreshSession]);
 
   return (
     <div>
