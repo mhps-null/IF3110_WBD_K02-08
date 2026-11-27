@@ -158,21 +158,27 @@ type CursorPlan struct {
 // integer type, and the column alone is covered by a unique index (PK/UNIQUE),
 // as required for a stable "WHERE col > last ORDER BY col LIMIT n" cursor.
 func ValidateCursor(ctx context.Context, db *sql.DB, table, column string) (CursorPlan, error) {
-	qt, err := quoteQualified(table)
+	parts, err := SplitQualified(table)
 	if err != nil {
 		return CursorPlan{}, err
 	}
-	qc, err := quoteIdent(column)
-	if err != nil {
-		return CursorPlan{}, err
+	if !ValidIdentifier(column) {
+		return CursorPlan{}, ErrInvalid
 	}
+	qt := pgx.Identifier(parts).Sanitize()
+	var resolvedSchema, resolvedTable, resolvedColumn string
 	var typ sql.NullString
 	var unique bool
-	err = db.QueryRowContext(ctx, `SELECT format_type(a.atttypid, a.atttypmod),
+	err = db.QueryRowContext(ctx, `SELECT n.nspname, c.relname, a.attname,
+			format_type(a.atttypid, a.atttypmod),
 			EXISTS(SELECT 1 FROM pg_index i WHERE i.indrelid=a.attrelid AND i.indisunique
 			       AND i.indnkeyatts=1 AND i.indkey[0]=a.attnum AND i.indpred IS NULL)
 		FROM pg_attribute a
-		WHERE a.attrelid=to_regclass($1) AND a.attname=$2 AND a.attnum>0 AND NOT a.attisdropped`, qt, column).Scan(&typ, &unique)
+		JOIN pg_class c ON c.oid=a.attrelid
+		JOIN pg_namespace n ON n.oid=c.relnamespace
+		WHERE a.attrelid=to_regclass($1) AND a.attname=$2 AND a.attnum>0 AND NOT a.attisdropped
+		  AND n.nspname NOT IN ('pg_catalog', 'information_schema')`, qt, column).
+		Scan(&resolvedSchema, &resolvedTable, &resolvedColumn, &typ, &unique)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CursorPlan{}, fmt.Errorf("batch cursor column %s.%s not found: %w", table, column, ErrInvalid)
 	}
@@ -187,7 +193,11 @@ func ValidateCursor(ctx context.Context, db *sql.DB, table, column string) (Curs
 	if !unique {
 		return CursorPlan{}, fmt.Errorf("batch cursor column must have a single-column unique index or primary key: %w", ErrInvalid)
 	}
-	return CursorPlan{Table: qt, Column: qc}, nil
+	catalogTable := pgx.Identifier{resolvedSchema, resolvedTable}.Sanitize()
+	if len(parts) == 1 && resolvedSchema == "public" {
+		catalogTable = pgx.Identifier{resolvedTable}.Sanitize()
+	}
+	return CursorPlan{Table: catalogTable, Column: pgx.Identifier{resolvedColumn}.Sanitize()}, nil
 }
 
 // scopeQuery and nextBoundQuery build cursor queries from quoted identifiers only.

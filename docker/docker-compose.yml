@@ -56,6 +56,25 @@ services:
       timeout: 3s
       retries: 10
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: if3110-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: if3110-loki
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/config.yaml:ro
+    ports:
+      - "3100:3100"
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.111.0
     container_name: if3110-otel-collector
@@ -67,6 +86,9 @@ services:
       - "4317:4317"
       - "4318:4318"
       - "8889:8889"
+    depends_on:
+      - jaeger
+      - loki
 
   prometheus:
     image: prom/prometheus:v2.54.1
@@ -97,3 +119,5 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+      - loki
+      - jaeger

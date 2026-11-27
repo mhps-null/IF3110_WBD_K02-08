@@ -1,9 +1,9 @@
 {
   "uid": "if3110-m2-observability",
-  "title": "IF3110 M2 — Migration Queue & DB Connection Pool",
+  "title": "IF3110 M2 — Migration Queue, DB Pool & Correlated Logs",
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "5s",
   "tags": ["if3110", "migration", "postgres", "observability"],
   "panels": [
@@ -15,7 +15,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "dbplatform_migration_jobs",
+          "expr": "max by (status) (dbplatform_migration_jobs)",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -29,17 +29,17 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "dbplatform_migration_job_retries_total",
+          "expr": "sum(dbplatform_migration_job_retries_total)",
           "legendFormat": "Retries",
           "refId": "A"
         },
         {
-          "expr": "dbplatform_migration_batches_processed_total",
+          "expr": "sum(dbplatform_migration_batches_processed_total)",
           "legendFormat": "Batches",
           "refId": "B"
         },
         {
-          "expr": "dbplatform_migration_rows_processed_total",
+          "expr": "sum(dbplatform_migration_rows_processed_total)",
           "legendFormat": "Rows",
           "refId": "C"
         }
@@ -53,12 +53,12 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "rate(dbplatform_migration_queue_wait_seconds_sum[1m]) / clamp_min(rate(dbplatform_migration_queue_wait_seconds_count[1m]), 1)",
+          "expr": "sum(rate(dbplatform_migration_queue_wait_seconds_sum[2m])) / clamp_min(sum(rate(dbplatform_migration_queue_wait_seconds_count[2m])), 1e-9)",
           "legendFormat": "Avg Queue Wait (s)",
           "refId": "A"
         },
         {
-          "expr": "rate(dbplatform_migration_lock_wait_seconds_sum[1m]) / clamp_min(rate(dbplatform_migration_lock_wait_seconds_count[1m]), 1)",
+          "expr": "sum(rate(dbplatform_migration_lock_wait_seconds_sum[2m])) / clamp_min(sum(rate(dbplatform_migration_lock_wait_seconds_count[2m])), 1e-9)",
           "legendFormat": "Avg DB Lock Wait (s)",
           "refId": "B"
         }
@@ -72,7 +72,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "rate(dbplatform_migration_duration_seconds_sum[1m]) / clamp_min(rate(dbplatform_migration_duration_seconds_count[1m]), 1)",
+          "expr": "sum by (status) (rate(dbplatform_migration_duration_seconds_sum[2m])) / clamp_min(sum by (status) (rate(dbplatform_migration_duration_seconds_count[2m])), 1e-9)",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -86,7 +86,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "dbplatform_db_pool_connections",
+          "expr": "max by (pool, state) (dbplatform_db_pool_connections)",
           "legendFormat": "{{pool}} ({{state}})",
           "refId": "A"
         }
@@ -100,8 +100,21 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "rate(dbplatform_db_pool_wait_seconds_total[1m])",
+          "expr": "rate(dbplatform_db_pool_wait_seconds_total[2m])",
           "legendFormat": "{{pool}} wait (s/sec)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "logs",
+      "title": "Centralized Application & SQL Logs (OTel Collector -> Loki)",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{service_name=~\"if3110-.*\"}",
           "refId": "A"
         }
       ]

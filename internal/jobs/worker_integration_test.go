@@ -922,3 +922,44 @@ func TestExecuteRejectsRevisionChangedBeforeEnqueue(t *testing.T) {
 		t.Fatalf("current revision should enqueue: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestConcurrentSameDBQueueExecutesSequentially(t *testing.T) {
+	e := setup(t)
+	r1 := e.approved(e.db1, "same db 1", `CREATE TABLE seq_t1 (id INT PRIMARY KEY)`, `DROP TABLE seq_t1`)
+	r2 := e.approved(e.db1, "same db 2", `CREATE TABLE seq_t2 (id INT PRIMARY KEY)`, `DROP TABLE seq_t2`)
+
+	// Enqueue both Approved migrations onto the SAME database before any worker claims them.
+	j1 := e.execute(r1, ExecuteOptions{})
+	j2 := e.execute(r2, ExecuteOptions{})
+	if j1.Status != StatusQueued || j2.Status != StatusQueued {
+		t.Fatalf("both approved jobs on same DB must enter queue: j1=%s j2=%s", j1.Status, j2.Status)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	for _, id := range []string{"wseq1", "wseq2"} {
+		w := e.worker(id)
+		wg.Add(1)
+		go func() { defer wg.Done(); _ = w.Run(ctx) }()
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		a, _ := e.svc.Store.Get(context.Background(), j1.ID)
+		b, _ := e.svc.Store.Get(context.Background(), j2.ID)
+		if a.Status == StatusSuccess && b.Status == StatusSuccess {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	wg.Wait()
+
+	a, _ := e.svc.Store.Get(context.Background(), j1.ID)
+	b, _ := e.svc.Store.Get(context.Background(), j2.ID)
+	if a.Status != StatusSuccess || b.Status != StatusSuccess {
+		t.Fatalf("both queued jobs on same DB must finish success: j1=%+v j2=%+v", a, b)
+	}
+	if e.scalar(e.tdb(e.db1), `SELECT count(*) FROM pg_tables WHERE tablename IN ('seq_t1','seq_t2')`) != 2 {
+		t.Fatal("both migrations must be applied on target database")
+	}
+}

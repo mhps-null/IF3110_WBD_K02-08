@@ -213,9 +213,21 @@ func (m *PromMetrics) RunGaugeRefresher(ctx context.Context, store *Store, pools
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
-		if counts, err := store.StatusCounts(ctx); err == nil {
-			for s, n := range counts {
-				m.SetJobStatusCount(s, n)
+		if store != nil {
+			if counts, err := store.StatusCounts(ctx); err == nil {
+				for s, n := range counts {
+					m.SetJobStatusCount(s, n)
+				}
+			}
+			if store.DB != nil {
+				ms := store.DB.Stats()
+				m.SyncPools([]contract.PoolStat{{
+					DBName:       "worker_metadata_db",
+					InUse:        ms.InUse,
+					Idle:         ms.Idle,
+					WaitCount:    ms.WaitCount,
+					WaitDuration: ms.WaitDuration,
+				}})
 			}
 		}
 		if pools != nil {

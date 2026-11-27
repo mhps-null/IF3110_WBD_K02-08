@@ -41,6 +41,7 @@ type SQLEvent struct {
 
 type Logger struct {
 	slogger *slog.Logger
+	closeFn func()
 }
 
 func NewLogger(w io.Writer, level slog.Level) *Logger {
@@ -52,6 +53,30 @@ func NewLogger(w io.Writer, level slog.Level) *Logger {
 			Level:       level,
 			ReplaceAttr: RedactAttr,
 		})),
+	}
+}
+
+// NewDefaultLogger writes JSON logs to console (stdout) and, when
+// OTEL_EXPORTER_OTLP_ENDPOINT is set, forwards structured log records via OTLP/HTTP
+// (/v1/logs) to the OpenTelemetry Collector.
+func NewDefaultLogger(console io.Writer, level slog.Level, service string) *Logger {
+	if console == nil {
+		console = os.Stdout
+	}
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if endpoint == "" {
+		return NewLogger(console, level)
+	}
+	tee := newOTLPTeeLogWriter(console, endpoint, service)
+	l := NewLogger(tee, level)
+	l.closeFn = tee.Close
+	return l
+}
+
+// Close flushes any queued OTLP log records on graceful shutdown.
+func (l *Logger) Close() {
+	if l != nil && l.closeFn != nil {
+		l.closeFn()
 	}
 }
 

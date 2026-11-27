@@ -27,9 +27,10 @@ import (
 )
 
 func main() {
-	obsLogger := observability.NewLogger(os.Stdout, slog.LevelInfo)
+	obsLogger := observability.NewDefaultLogger(os.Stdout, slog.LevelInfo, "if3110-worker")
+	defer obsLogger.Close()
 	logger := obsLogger.Slog()
-	tracer := observability.NewTracer("worker", observability.NewConsoleSpanExporter(os.Stderr))
+	tracer := observability.NewTracer("if3110-worker", observability.NewDefaultSpanExporter(os.Stderr))
 	metrics := jobs.NewPromMetrics()
 
 	dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
@@ -89,7 +90,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	go metrics.RunGaugeRefresher(ctx, jobs.NewStore(meta), pools, 5*time.Second)
+	go metrics.RunGaugeRefresher(ctx, jobs.NewStore(meta), pools, 3*time.Second)
+	observability.StartOTLPMetricsPusher(ctx, "if3110-worker", func() string {
+		var b strings.Builder
+		_, _ = metrics.WriteTo(&b)
+		return b.String()
+	}, 4*time.Second)
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", metrics.Handler())

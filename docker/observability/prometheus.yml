@@ -1,19 +1,16 @@
-# Prometheus scrape configuration for API server, Async Worker, and OTel Collector.
+# Prometheus scrape configuration.
+# Note: Both API (:8080/metrics) and Worker (:9091/metrics) expose native Prometheus endpoints
+# AND forward metrics via OTLP (/v1/metrics) to otel-collector:8889 so scraping works identically
+# across Linux (with host bridge firewalls), macOS, and Windows.
 global:
   scrape_interval: 5s
   evaluation_interval: 5s
 
 scrape_configs:
-  - job_name: "dbplatform-api"
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["host.docker.internal:8080", "host.docker.internal:8081"]
-
-  - job_name: "dbplatform-worker"
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["host.docker.internal:9091"]
-
   - job_name: "otel-collector"
     static_configs:
       - targets: ["otel-collector:8889"]
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
