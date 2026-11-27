@@ -3,6 +3,7 @@ import { Activity, CheckCircle2, Pencil, PlugZap, Plus, Server, Trash2, XCircle 
 import { connectionsApi, type ConnectionPayload } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import type { DBConnection, PoolStat } from '../types/api';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Badge, EmptyState, ErrorState, LoadingState, PageHeader } from '../components/shared/UIStates';
 import { ConfirmDialog } from '../components/shared/ConfirmDialog';
@@ -19,6 +20,7 @@ const emptyForm: ConnectionPayload = {
 };
 
 export function AdminConnectionsPage() {
+  const { refreshSession } = useAuth();
   const { notify } = useToast();
   const [connections, setConnections] = useState<DBConnection[]>([]);
   const [pools, setPools] = useState<PoolStat[]>([]);
@@ -90,7 +92,7 @@ export function AdminConnectionsPage() {
         notify('success', res.message);
       }
       resetForm();
-      await load();
+      await Promise.all([load(), refreshSession()]);
     } catch (err) {
       notify('error', err instanceof ApiError ? err.message : 'Gagal menyimpan koneksi.');
     } finally {
@@ -124,7 +126,7 @@ export function AdminConnectionsPage() {
       const res = await connectionsApi.remove(deleteTarget.id);
       notify('success', res.message);
       setDeleteTarget(null);
-      await load();
+      await Promise.all([load(), refreshSession()]);
     } catch (err) {
       notify('error', err instanceof ApiError ? err.message : 'Gagal menghapus koneksi.');
     } finally {

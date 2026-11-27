@@ -143,8 +143,8 @@ export function AppShell() {
   return (
     <div className="flex min-h-screen bg-slate-50">
       {/* Desktop sidebar */}
-      <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white lg:block">
-        <div className="sticky top-0 h-screen">{sidebarContent}</div>
+      <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:block">
+        <div className="h-full">{sidebarContent}</div>
       </aside>
 
       {/* Mobile slide-over drawer */}
@@ -170,7 +170,7 @@ export function AppShell() {
       )}
 
       {/* Main viewport */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col lg:pl-64">
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4 lg:hidden">
           <button
             type="button"

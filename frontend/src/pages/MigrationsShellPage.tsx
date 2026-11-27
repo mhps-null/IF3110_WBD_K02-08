@@ -22,9 +22,13 @@ type Details = {
 
 export function MigrationsShellPage() {
   const { id } = useParams<{ id: string }>();
-  const { accessibleDatabases, user } = useAuth();
+  const { accessibleDatabases, user, refreshSession } = useAuth();
   const { notify } = useToast();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    void refreshSession();
+  }, [refreshSession]);
 
   const db = id ? Number(id) : accessibleDatabases[0]?.db_id ?? 0;
   const current = accessibleDatabases.find((x) => x.db_id === db);
